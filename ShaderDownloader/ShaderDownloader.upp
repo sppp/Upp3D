@@ -1,0 +1,11 @@
+uses
+	Core;
+
+file
+	some.py,
+	ShaderDownloader.h,
+	ShaderDownloader.cpp;
+
+mainconfig
+	"" = "";
+

@@ -1,0 +1,15 @@
+uses
+	SpppCtrl;
+
+file
+	ShaderViewer.h,
+	ShaderViewer.cpp,
+	Screen.h,
+	Screen.cpp,
+	StdScreen.cpp,
+	Gfx.h,
+	Gfx.cpp;
+
+mainconfig
+	"" = "";
+
