@@ -9,9 +9,9 @@ enum GLSLVersion {
 };
 
 enum GLSLExtension {
-	GL_ARB_explicit_attrib_location = 0,
-	GL_ARB_explicit_uniform_location = 1,
-	GL_ARB_shading_language_420pack = 2,
+	GLSL__GL_ARB_explicit_attrib_location = 0,
+	GLSL__GL_ARB_explicit_uniform_location = 1,
+	GLSL__GL_ARB_shading_language_420pack = 2,
 };
 
 class Program {
@@ -61,7 +61,7 @@ public:
 	
 	void EnableExtension(GLSLExtension extension) {
 		switch (extension) {
-		case GLSLExtension::GL_ARB_explicit_attrib_location:
+		case GLSLExtension::GLSL__GL_ARB_explicit_attrib_location:
 			if (is_GL_ARB_explicit_attrib_location) {
 				return;
 			}
@@ -69,7 +69,7 @@ public:
 			vertex_source += "#extension GL_ARB_explicit_attrib_location : enable\n";
 			fragment_source += "#extension GL_ARB_explicit_attrib_location : enable\n";
 			break;
-		case GLSLExtension::GL_ARB_explicit_uniform_location:
+		case GLSLExtension::GLSL__GL_ARB_explicit_uniform_location:
 			if (is_GL_ARB_explicit_uniform_location) {
 				return;
 			}
@@ -77,7 +77,7 @@ public:
 			vertex_source += "#extension GL_ARB_explicit_uniform_location : enable\n";
 			fragment_source += "#extension GL_ARB_explicit_uniform_location : enable\n";
 			break;
-		case GLSLExtension::GL_ARB_shading_language_420pack:
+		case GLSLExtension::GLSL__GL_ARB_shading_language_420pack:
 			if (is_GL_ARB_shading_language_420pack) {
 				return;
 			}

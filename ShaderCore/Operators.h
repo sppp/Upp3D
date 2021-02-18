@@ -4,15 +4,27 @@
 NAMESPACE_GLSL_BEGIN
 
 // float operators
-template <typename detail>
-inline GenType<detail> operator+(const GenType<detail>& a, typename detail::native_type b) {
-	return GenType<detail>(xs("(% + %)", a.Definition(), b));
-}
 
-template <typename detail>
-inline GenType<detail> operator+(const GenType<detail>& a, const GenType<detail>& b) {
-	return GenType<detail>(xs("(% + %)", a.Definition(), b.Definition()));
-}
+#define SIMPLE_OP(op) \
+	template <typename detail> \
+	inline GenType<detail> operator op(const GenType<detail>& a, typename detail::native_type b) { \
+		return GenType<detail>(xs("(% " #op " %)", a.Definition(), b)); \
+	} \
+	template <typename detail> \
+	inline GenType<detail> operator op(const GenType<detail>& a, const GenType<detail>& b) { \
+		return GenType<detail>(xs("(% " #op " %)", a.Definition(), b.Definition())); \
+	}
+SIMPLE_OP(+)
+SIMPLE_OP(-)
+SIMPLE_OP(*)
+SIMPLE_OP(/)
+SIMPLE_OP(%)
+SIMPLE_OP(<)
+SIMPLE_OP(>)
+SIMPLE_OP(<=)
+SIMPLE_OP(>=)
+SIMPLE_OP(!=)
+SIMPLE_OP(==)
 
 template <typename detail>
 inline void operator+=(GenType<detail>& a, typename detail::native_type b) {
@@ -25,18 +37,8 @@ inline void operator+=(GenType<detail>& a, const GenType<detail>& b) {
 }
 
 template <typename detail>
-inline GenType<detail> operator-(const GenType<detail>& a, typename detail::native_type b) {
-	return GenType<detail>(xs("(% - %)", a.Definition(), b));
-}
-
-template <typename detail>
 inline GenType<detail> operator-(typename detail::native_type a, const GenType<detail>& b) {
 	return GenType<detail>(xs("(% - %)", a, b.Definition()));
-}
-
-template <typename detail>
-inline GenType<detail> operator-(const GenType<detail>& a, const GenType<detail>& b) {
-	return GenType<detail>(xs("(% - %)", a.Definition(), b.Definition()));
 }
 
 template <typename detail>
@@ -53,18 +55,16 @@ inline GenType<gentype_float_detail> operator*(const GenType<gentype_float_detai
 	return GenType<gentype_float_detail>(xs("(% * %)", a.Definition(), b.Definition()));
 }
 
+inline GenType<gentype_float_detail> operator*(const GenType<gentype_float_detail>& a, double b) {
+	return GenType<gentype_float_detail>(xs("(% * %)", a.Definition(), Flatten(b)));
+}
+
+inline GenType<gentype_float_detail> operator*(double a, const GenType<gentype_float_detail>& b) {
+	return GenType<gentype_float_detail>(xs("(% * %)", Flatten(a), b.Definition()));
+}
+
 inline GenType<gentype_float_detail> operator*(const GenType<gentype_int_detail>& a, const GenType<gentype_float_detail>& b) {
 	return GenType<gentype_float_detail>(xs("(% * %)", a.Definition(), b.Definition()));
-}
-
-template <typename detail>
-inline GenType<detail> operator*(const GenType<detail>& a, typename detail::native_type b) {
-	return GenType<detail>(xs("(% * %)", a.Definition(), b));
-}
-
-template <typename detail>
-inline GenType<detail> operator*(const GenType<detail>& a, const GenType<detail>& b) {
-	return GenType<detail>(xs("(% * %)", a.Definition(), b.Definition()));
 }
 
 template <typename detail>
@@ -78,16 +78,6 @@ inline void operator*=(GenType<detail>& a, const GenType<detail>& b) {
 }
 
 template <typename detail>
-inline GenType<detail> operator/(const GenType<detail>& a, typename detail::native_type b) {
-	return GenType<detail>(xs("(% / %)", a.Definition(), b));
-}
-
-template <typename detail>
-inline GenType<detail> operator/(const GenType<detail>& a, const GenType<detail>& b) {
-	return GenType<detail>(xs("(% / %)", a.Definition(), b.Definition()));
-}
-
-template <typename detail>
 inline void operator/=(GenType<detail>& a, typename detail::native_type b) {
 	a = a / b;
 }
@@ -95,16 +85,6 @@ inline void operator/=(GenType<detail>& a, typename detail::native_type b) {
 template <typename detail>
 inline void operator/=(GenType<detail>& a, const GenType<detail>& b) {
 	a = a / b;
-}
-
-template <typename detail>
-inline GenType<detail> operator%(const GenType<detail>& a, typename detail::native_type b) {
-	return GenType<detail>(xs("(% %% %)", a.Definition(), b));
-}
-
-template <typename detail>
-inline GenType<detail> operator%(const GenType<detail>& a, const GenType<detail>& b) {
-	return GenType<detail>(xs("(% %% %)", a.Definition(), b.Definition()));
 }
 
 // vec2 operators

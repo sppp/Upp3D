@@ -20,6 +20,13 @@ using Exc = UPP::Exc;
 class Program;
 extern Program* current_program;
 
+#define _X .x()
+#define _Y .y()
+#define _Z .z()
+#define _ZX .zx()
+#define _XY .xy()
+#define _XYZ .xyz()
+
 NAMESPACE_GLSL_END
 
 #include "StringUtil.h"

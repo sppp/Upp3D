@@ -48,6 +48,11 @@ public:
 			temp_init(xs("%(%, %, %)", vec_detail::glsl_type_string(), x.Definition(), y.Definition(), z.Definition())) {
 	}
 	
+	generic_vec3(double v) :
+			Type(Temporary, vec_detail::glsl_type_float(), current_program->GenerateName()),
+			temp_init(xs("%(%)", vec_detail::glsl_type_float(), Flatten(v))) {
+	}
+	
 	generic_vec3(const t_vec2& xy, const t_abstract& z) :
 			Type(Temporary, vec_detail::glsl_type_string(), current_program->GenerateName()),
 			temp_init(xs("%(%, %)", vec_detail::glsl_type_string(), xy.Definition(), z.Definition())) {

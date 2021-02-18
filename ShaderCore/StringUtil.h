@@ -79,7 +79,7 @@ inline void xs(String& result, const char* s, T value, Args... args)
 				return;
 			}
 		}
-		result += *s++;
+		result.Cat(*s++);
 	}
 	throw std::logic_error("extra arguments provided to printf");
 }
@@ -104,7 +104,7 @@ inline void xs(String& result, const char* s, String value, Args... args)
 				return;
 			}
 		}
-		result += *s++;
+		result.Cat(*s++);
 	}
 	throw std::logic_error("extra arguments provided to printf");
 }
@@ -129,7 +129,7 @@ inline void xs(String& result, const char* s, const char* value, Args... args)
 				return;
 			}
 		}
-		result += *s++;
+		result.Cat(*s++);
 	}
 	throw std::logic_error("extra arguments provided to printf");
 }
@@ -158,7 +158,7 @@ inline void xs(String& result, const char* s)
 			}
 		}
 
-		result += *s++;
+		result.Cat(*s++);
 	}
 }
 

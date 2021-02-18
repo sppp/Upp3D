@@ -1,9 +1,13 @@
+description "\377B255,0,255";
+
 uses
 	Sppp;
 
 file
 	Copying,
 	main.cpp,
+	shdr_opengl.h,
+	shdr_sw.h,
 	ShaderCore.h,
 	ShaderCore.cpp,
 	AtomCountFunctions.h,

@@ -74,7 +74,16 @@ template <typename T>
 inline typename AbstractType<T>::type max(const T& x, const T& y) {
 	return xs("max(%, %)", x, y);
 }
+/*template <typename T0, typename T1>
+inline typename AbstractType<T0>::type min(const T0& x, const T1& y) {
+	return xs("min(%, %)", x, y);
+}
 
+template <typename T0, typename T1>
+inline typename AbstractType<T0>::type max(const T0& x, const T1& y) {
+	return xs("max(%, %)", x, y);
+}
+*/
 template <typename T>
 inline typename AbstractType<T>::type mix(const T& x, const T& y, const T& a) {
 	return xs("mix(%, %, %)", x, y, a);
