@@ -5,6 +5,7 @@ uses
 
 file
 	main.cpp,
+	PrintGLSL.cpp,
 	ShaderCore.h,
 	AST.h,
 	AST.cpp,
@@ -14,7 +15,10 @@ file
 	Parser.h,
 	Parser.cpp,
 	Util.h,
-	Util.cpp;
+	Util.cpp,
+	MultiStage.h,
+	MultiStage.cpp,
+	OpenGL.cpp;
 
 mainconfig
 	"" = "",

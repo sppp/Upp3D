@@ -19,6 +19,8 @@ struct Memory : Moveable<Memory> {
     ~Memory() {Destroy();}
     template <typename T> Memory(T *data) : data((void*)data), dtor(&Destroyer<T>) {}
     
+    template <typename T> void Set(T* data) {Destroy(); this->data = data; dtor = &Destroyer<T>;}
+    
     void Destroy() {
         if (data) {
 			dtor(data);
@@ -33,12 +35,12 @@ struct Node {
     void *operator new(size_t size, Vector<Memory> *collector) throw() {
         void *data = malloc(size);
         if (data)
-            collector->Add(Memory((T*)data));
+            collector->Add().Set((T*)data);
         return data;
     }
+    void operator delete(void *);
 private:
     void *operator new(size_t);
-    void operator delete(void *);
 };
 
 
@@ -93,9 +95,9 @@ struct Struct : Type {
 typedef Expression ConstantExpression;
 
 enum {
-    kHighp,
-    kMediump,
-    kLowp
+    HIGH_PRECISION,
+    MEDIUM_PRECISION,
+    LOW_PRECISION
 };
 
 struct Variable : Node<Variable> {

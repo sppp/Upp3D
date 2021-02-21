@@ -9,12 +9,15 @@
 
 #include <Sppp/Sppp.h>
 
-#define NAMESPACE_SHADER_BEGIN namespace Sppp { namespace Shader {
+#define NAMESPACE_SHADER_BEGIN namespace Sppp { namespace ShaderCore {
 #define NAMESPACE_SHADER_END   }}
+#define NAMESPACE_SHADER       ShaderCore
+#define NS_SHADER              NAMESPACE_SHADER
 
 #include "Util.h"
 #include "Lexer.h"
 #include "AST.h"
 #include "Parser.h"
+#include "MultiStage.h"
 
 #endif

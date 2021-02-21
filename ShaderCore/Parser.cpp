@@ -341,10 +341,10 @@ CHECK_RETURN TU *Parser::Parse(int type) {
                 global->is_array = Parse.is_array;
                 global->array_sizes <<= Parse.array_sizes;
                 ast->globals.Add(global);
-                scopes.back().Add(global);
+                scopes.Top().Add(global);
             }
         } else if (IsOperator(OPERATOR_paranthesis_begin)) {
-            Function *function = ParseFunction(items.front());
+            Function *function = ParseFunction(items[0]);
             if (!function)
                 return 0;
             ast->functions.Add(function);
@@ -421,13 +421,13 @@ CHECK_RETURN bool Parser::ParseInterpolation(TopLevel &current) {
 CHECK_RETURN bool Parser::ParsePrecision(TopLevel &current) {
     // highp, mediump, lowp
     if (IsKeyword(KEYWORD_highp)) {
-        current.precision = kHighp;
+        current.precision = HIGH_PRECISION;
         if (!Next()) return false; // skip 'highp'
     } else if (IsKeyword(KEYWORD_mediump)) {
-        current.precision = kMediump;
+        current.precision = MEDIUM_PRECISION;
         if (!Next()) return false; // skip 'mediump'
     } else if (IsKeyword(KEYWORD_lowp)) {
-        current.precision = kLowp;
+        current.precision = LOW_PRECISION;
         if (!Next()) return false; // skip 'lowp'
     }
     return true;
@@ -803,7 +803,7 @@ CHECK_RETURN bool Parser::ParseTopLevel(Vector<TopLevel> &items) {
         if (!Next())
             return false; // skip ','
         TopLevel nextItem;
-        if (!ParseTopLevelItem(nextItem, &items.front()))
+        if (!ParseTopLevelItem(nextItem, &items[0]))
             return false;
         if (nextItem.type)
             items.Add(nextItem);
@@ -1175,14 +1175,14 @@ CHECK_RETURN SwitchStatement *Parser::ParseSwitchStatement() {
                 // "It is a compile-time error to have two case label constant-expression of equal value"
                 if (value->type == Expression::INT_CONST) {
                     const int val = IVAL(value);
-                    if (Shader::Find(seenInts.begin(), seenInts.end(), val) != seenInts.end()) {
+                    if (NAMESPACE_SHADER::Find(seenInts.begin(), seenInts.end(), val) != seenInts.end()) {
                         Fatal("duplicate case label `%d'", val);
                         return 0;
                     }
                     seenInts.Add(val);
                 } else if (value->type == Expression::UINT_CONST) {
                     const unsigned int val = UVAL(value);
-                    if (Shader::Find(seenUInts.begin(), seenUInts.end(), val) != seenUInts.end()) {
+                    if (NAMESPACE_SHADER::Find(seenUInts.begin(), seenUInts.end(), val) != seenUInts.end()) {
                         Fatal("duplicate case label `%u'", val);
                         return 0;
                     }
@@ -1398,7 +1398,7 @@ CHECK_RETURN DeclarationStatement *Parser::ParseDeclarationStatement(EndConditio
                 return 0;
         }
 
-        if (statement->variables.empty() && !IsOperator(OPERATOR_assign)
+        if (statement->variables.IsEmpty() && !IsOperator(OPERATOR_assign)
             && !IsOperator(OPERATOR_comma) && !IsEndCondition(condition))
         {
             lexer.Restore();
@@ -1419,7 +1419,7 @@ CHECK_RETURN DeclarationStatement *Parser::ParseDeclarationStatement(EndConditio
         variable->name = NewString(name);
         variable->initial_value = initial_value;
         statement->variables.Add(variable);
-        scopes.back().Add(variable);
+        scopes.Top().Add(variable);
 
         if (IsEndCondition(condition)) {
             break;
@@ -1496,30 +1496,42 @@ CHECK_RETURN Function *Parser::ParseFunction(const TopLevel &Parse) {
         while (!IsOperator(OPERATOR_comma) && !IsOperator(OPERATOR_paranthesis_end)) {
             if (IsKeyword(KEYWORD_in)) {
                 parameter->storage = QUAL_IN;
-            } else if (IsKeyword(KEYWORD_out)) {
+            }
+            else if (IsKeyword(KEYWORD_out)) {
                 parameter->storage = QUAL_OUT;
-            } else if (IsKeyword(KEYWORD_inout)) {
+            }
+            else if (IsKeyword(KEYWORD_inout)) {
                 parameter->storage = QUAL_INOUT;
-            } else if (IsKeyword(KEYWORD_highp)) {
-                parameter->precision = kHighp;
-            } else if (IsKeyword(KEYWORD_mediump)) {
-                parameter->precision = kMediump;
-            } else if (IsKeyword(KEYWORD_lowp)) {
-                parameter->precision = kLowp;
-            } else if (IsKeyword(KEYWORD_coherent)) {
+            }
+            else if (IsKeyword(KEYWORD_highp)) {
+                parameter->precision = HIGH_PRECISION;
+            }
+            else if (IsKeyword(KEYWORD_mediump)) {
+                parameter->precision = MEDIUM_PRECISION;
+            }
+            else if (IsKeyword(KEYWORD_lowp)) {
+                parameter->precision = LOW_PRECISION;
+            }
+            else if (IsKeyword(KEYWORD_coherent)) {
                 parameter->memory = MEM_COHERENT;
-            } else if (IsKeyword(KEYWORD_volatile)) {
+            }
+            else if (IsKeyword(KEYWORD_volatile)) {
                 parameter->memory = MEM_VOLATILE;
-            } else if (IsKeyword(KEYWORD_restrict)) {
+            }
+            else if (IsKeyword(KEYWORD_restrict)) {
                 parameter->memory = MEM_RESTRICT;
-            } else if (IsKeyword(KEYWORD_readonly)) {
+            }
+            else if (IsKeyword(KEYWORD_readonly)) {
                 parameter->memory = MEM_READONLY;
-            } else if (IsKeyword(KEYWORD_writeonly)) {
+            }
+            else if (IsKeyword(KEYWORD_writeonly)) {
                 parameter->memory = MEM_WRITEONLY;
-            } else if (IsType(TYPE_identifier)) {
+            }
+            else if (IsType(TYPE_identifier)) {
                 // TODO: user defined types
                 parameter->name = NewString(token.as_identifier);
-            } else if (IsOperator(OPERATOR_bracket_begin)) {
+            }
+            else if (IsOperator(OPERATOR_bracket_begin)) {
                 while (IsOperator(OPERATOR_bracket_begin)) {
                     parameter->is_array = true;
                     ConstantExpression *array_size = ParseArraySize();
@@ -1527,7 +1539,8 @@ CHECK_RETURN Function *Parser::ParseFunction(const TopLevel &Parse) {
                         return 0;
                     parameter->array_sizes.Add(array_size);
                 }
-            } else {
+            }
+            else {
                 parameter->base_type = ParseBuiltin();
                 if (parameter->base_type && parameter->base_type->builtin) {
                     Builtin *builtin = (Builtin*)parameter->base_type;
@@ -1559,14 +1572,14 @@ CHECK_RETURN Function *Parser::ParseFunction(const TopLevel &Parse) {
         if (function->parameters[0]->base_type->builtin) {
             Builtin *builtin = (Builtin*)function->parameters[0]->base_type;
             if (builtin->type == KEYWORD_void)
-                function->parameters.pop_back();
+                function->parameters.Remove(function->parameters.GetCount()-1);
         }
     }
 
     // "It is a compile-time or link-time error to declare or define a function main with any other parameters or
     //  return type."
     if (!strcmp(function->name, "main")) {
-        if (!function->parameters.empty()) {
+        if (!function->parameters.IsEmpty()) {
             Fatal("`main' cannot have parameters");
             return 0;
         }
@@ -1583,7 +1596,7 @@ CHECK_RETURN Function *Parser::ParseFunction(const TopLevel &Parse) {
 
         scopes.Add(Scope());
         for (int i = 0; i < function->parameters.GetCount(); i++)
-            scopes.back().Add(function->parameters[i]);
+            scopes.Top().Add(function->parameters[i]);
         while (!IsType(TYPE_scope_end)) {
             Statement *statement = ParseStatement();
             if (!statement)
@@ -1593,7 +1606,7 @@ CHECK_RETURN Function *Parser::ParseFunction(const TopLevel &Parse) {
                 return 0;
         }
 
-        scopes.pop_back();
+        scopes.Remove(scopes.GetCount()-1);
     } else if (IsType(TYPE_semicolon)) {
         function->is_prototype = true;
     } else {
@@ -1620,7 +1633,7 @@ Builtin *Parser::ParseBuiltin() {
             }
         }
         builtins.Add(GC_NEW(Type) Builtin(token.as_keyword));
-        return builtins.back();
+        return builtins.Top();
         break;
     default:
         break;
