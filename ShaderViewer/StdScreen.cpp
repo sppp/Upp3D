@@ -1,3 +1,4 @@
+#if 0
 #include "ShaderViewer.h"
 
 NAMESPACE_SPPP_BEGIN
@@ -741,3 +742,4 @@ GLint StdScreen::LinkProgram(std::string shader_source) {
 
 
 NAMESPACE_SPPP_END
+#endif

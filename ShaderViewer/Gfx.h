@@ -1,3 +1,4 @@
+#if 0
 #ifndef _ShaderViewer_Gfx_h_
 #define _ShaderViewer_Gfx_h_
 
@@ -101,4 +102,5 @@ struct Pipeline {
 NAMESPACE_SPPP_END
 
 
+#endif
 #endif

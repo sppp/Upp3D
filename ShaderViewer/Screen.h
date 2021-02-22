@@ -1,3 +1,4 @@
+#if 0
 #ifndef _ShaderViewer_Screen_h_
 #define _ShaderViewer_Screen_h_
 
@@ -128,4 +129,5 @@ public:
 NAMESPACE_SPPP_END
 
 
+#endif
 #endif

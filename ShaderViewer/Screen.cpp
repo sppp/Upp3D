@@ -1,3 +1,4 @@
+#if 0
 #include "ShaderViewer.h"
 
 
@@ -206,3 +207,4 @@ void Screen::RemoveToken(String& glsl, String token) {
 
 
 NAMESPACE_SPPP_END
+#endif

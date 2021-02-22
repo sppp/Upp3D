@@ -358,6 +358,27 @@ bool MultiStage::Open(Size output_sz) {
 					return false;
 				}
 			}
+			else if (in.type == INPUT_CUBEMAP) {
+				LOG("error: not implemented " << GetInputTypeString(in.type));
+			}
+			else if (in.type == INPUT_WEBCAM) {
+				LOG("error: not implemented " << GetInputTypeString(in.type));
+			}
+			else if (in.type == INPUT_MUSIC) {
+				LOG("error: not implemented " << GetInputTypeString(in.type));
+			}
+			else if (in.type == INPUT_MUSICSTREAM) {
+				LOG("error: not implemented " << GetInputTypeString(in.type));
+			}
+			else if (in.type == INPUT_KEYBOARD) {
+				LOG("error: not implemented " << GetInputTypeString(in.type));
+			}
+			else if (in.type == INPUT_VOLUME) {
+				LOG("error: not implemented " << GetInputTypeString(in.type));
+			}
+			else if (in.type == INPUT_VIDEO) {
+				LOG("error: not implemented " << GetInputTypeString(in.type));
+			}
 			else if (in.type == INPUT_BUFFER) {
 				// Nothing to do here
 			}

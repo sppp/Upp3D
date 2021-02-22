@@ -417,7 +417,7 @@ CONSOLE_APP_MAIN
 		return;
 	}*/
 	Index<String> written_relpaths;
-	
+	ArrayMap<String, FileOut> required_type_files;
 	for(int i = 0; i < json_cats.GetCount(); i++) {
 		String json_path = json_cats.GetKey(i);
 		String cat = json_cats[i];
@@ -487,6 +487,8 @@ CONSOLE_APP_MAIN
 		fout << "owner = " << username << "\n";
 		fout << "\n";
 		
+		
+		Index<String> required_types;
 		Index<String> id_idx;
 		ValueArray rendpass = vm.GetAdd("renderpass");
 		if (rendpass.GetCount() == 1)
@@ -514,6 +516,8 @@ CONSOLE_APP_MAIN
 				fout << pre << "type = " << type << "\n";
 				fout << pre << "channel = " << channel << "\n";
 				fout << "\n";
+				
+				required_types.FindAdd(type);
 			}
 			
 			ValueArray inputs = pass.GetAdd("inputs");
@@ -529,6 +533,8 @@ CONSOLE_APP_MAIN
 				String pre = "pass-" + IntStr(i) + "-input-" + IntStr(ch) + "-";
 				fout << pre << "id = " << id_i << "\n";
 				fout << pre << "type = " << type << "\n";
+				
+				required_types.FindAdd(type);
 				
 				if (filepath.Find("/media/a/") == 0 && filepath.Find("media/previz/") == -1) {
 					String filename = GetFileName(filepath);
@@ -566,6 +572,14 @@ CONSOLE_APP_MAIN
 				fout << pre << "id = " << id_i << "\n";
 				fout << "\n";
 			}
+		}
+		
+		for(String type : required_types) {
+			FileOut& fout = required_type_files.GetAdd(type);
+			if (!fout.IsOpen()) {
+				fout.Open(AppendFileName(dir, "requires_" + type + ".txt"));
+			}
+			fout << relpath << "\n";
 		}
 	}
 	

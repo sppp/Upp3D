@@ -225,7 +225,7 @@ bool MultiStage::Ogl_LinkProgram(Stage& s) {
 		
 		glGetActiveUniform(program, i, 79, &namelen, &size, &type, name);
 		name[namelen] = '\0';
-		LOG("\t\t\t" << i << ": " << String(name) << " (type: " << HexStr(type) << ", size: " << (int)size);
+		LOG("\t\t\t" << i << ": " << String(name) << " (type: " << HexStr(type) << ", size: " << (int)size << ")");
 	}
 	
 	return true;
