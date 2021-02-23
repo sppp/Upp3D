@@ -17,47 +17,47 @@ void MultiStage::Ogl_UpdateTexBuffers() {
 		}
 		else {
 			pass.is_buffer = true;
-			ASSERT(pass.color_buf == 0);
-			
-			// color buffer
-			glGenTextures(1, &pass.color_buf);
-			glBindTexture(GL_TEXTURE_2D, pass.color_buf);
-			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, size.cx, size.cy, 0, GL_RGBA, GL_UNSIGNED_BYTE, 0);
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-			glBindTexture(GL_TEXTURE_2D, 0);
-			
-			// depth buffer
-			glGenRenderbuffersEXT(1, &pass.depth_buf);
-			glBindRenderbufferEXT(GL_RENDERBUFFER_EXT, pass.depth_buf);
-			glRenderbufferStorageEXT(GL_RENDERBUFFER_EXT, GL_DEPTH_COMPONENT, size.cx, size.cy);
-			glBindRenderbufferEXT(GL_RENDERBUFFER_EXT, 0);
-			
-			// FBO
-			glGenFramebuffersEXT(1, &pass.frame_buf);
-			glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, pass.frame_buf);
-			
-			// combine FBO to color buffer
-			glFramebufferTexture2DEXT(GL_FRAMEBUFFER_EXT, GL_COLOR_ATTACHMENT0_EXT, GL_TEXTURE_2D, pass.color_buf, 0);
-			
-			// combine FBO to depth buffer
-			glFramebufferRenderbufferEXT(GL_FRAMEBUFFER_EXT, GL_DEPTH_ATTACHMENT_EXT, GL_RENDERBUFFER_EXT, pass.depth_buf);
-			
-			// reset FBO
-			glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, 0);
-		}
-	}
-	
-	for (Stage& s : passes) {
-		for (StageInput& in : s.in) {
-			if (in.type == INPUT_BUFFER) {
-				Stage& is = GetStageById(in.id);
-				in.tex = is.color_buf;
+			int buf_count = 1;
+			if (pass.is_doublebuf)
+				buf_count++;
+			for(int bi = 0; bi < buf_count; bi++) {
+				GLuint& color_buf = pass.color_buf[bi];
+				GLuint& depth_buf = pass.depth_buf[bi];
+				GLuint& frame_buf = pass.frame_buf[bi];
+				ASSERT(color_buf == 0);
+				
+				// color buffer
+				glGenTextures(1, &color_buf);
+				glBindTexture(GL_TEXTURE_2D, color_buf);
+				glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, size.cx, size.cy, 0, GL_RGBA, GL_UNSIGNED_BYTE, 0);
+				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+				glBindTexture(GL_TEXTURE_2D, 0);
+				
+				// depth buffer
+				glGenRenderbuffersEXT(1, &depth_buf);
+				glBindRenderbufferEXT(GL_RENDERBUFFER_EXT, depth_buf);
+				glRenderbufferStorageEXT(GL_RENDERBUFFER_EXT, GL_DEPTH_COMPONENT, size.cx, size.cy);
+				glBindRenderbufferEXT(GL_RENDERBUFFER_EXT, 0);
+				
+				// FBO
+				glGenFramebuffersEXT(1, &frame_buf);
+				glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, frame_buf);
+				
+				// combine FBO to color buffer
+				glFramebufferTexture2DEXT(GL_FRAMEBUFFER_EXT, GL_COLOR_ATTACHMENT0_EXT, GL_TEXTURE_2D, color_buf, 0);
+				
+				// combine FBO to depth buffer
+				glFramebufferRenderbufferEXT(GL_FRAMEBUFFER_EXT, GL_DEPTH_ATTACHMENT_EXT, GL_RENDERBUFFER_EXT, depth_buf);
+				
+				// reset FBO
+				glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, 0);
 			}
 		}
 	}
+	
 }
 
 
@@ -77,10 +77,8 @@ int MultiStage::Ogl_LoadTexture(String filename, GLenum type, GLenum *tex_id, ch
 		return 0;
 	}
 	
-	FloatImage fimg = img;
-	
-	
 	/*
+	
 	int rowstride;
 	int cpp, bps;
 	int x, y, c;
@@ -116,16 +114,33 @@ int MultiStage::Ogl_LoadTexture(String filename, GLenum type, GLenum *tex_id, ch
 		}
 	}*/
 	
-	ASSERT(fimg.GetChannels() >= 3);
-	ASSERT(fimg.GetSize() == width * height * fimg.GetChannels());
 	
 	glGenTextures(1, tex_id);
 	glBindTexture(type, *tex_id);
-	glTexImage2D(type, 0, GL_RGBA8,
-				 width, height,
-				 0, fimg.GetChannels() == 3 ? GL_RGB32F : GL_RGBA32F,
-				 GL_FLOAT,
-				 fimg.Detach());
+	
+	int channels = 0;
+	if (0) {
+		FloatImage fimg = img;
+		channels = fimg.GetChannels();
+		ASSERT(channels >= 3 && channels <= 4);
+		ASSERT(fimg.GetSize() == width * height * channels);
+		glTexImage2D(type, 0, GL_RGBA32F,
+					 width, height,
+					 0, channels == 3 ? GL_RGB : GL_RGBA,
+					 GL_FLOAT,
+					 fimg.Detach());
+	}
+	else {
+		ByteImage bimg = img;
+		channels = bimg.GetChannels();
+		ASSERT(channels >= 3 && channels <= 4);
+		ASSERT(bimg.GetSize() == width * height * channels);
+		glTexImage2D(type, 0, GL_RGBA,
+					 width, height,
+					 0, channels == 3 ? GL_RGB : GL_RGBA,
+					 GL_UNSIGNED_BYTE,
+					 bimg.Detach());
+	}
 	
 	if (filter == 0) {
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
@@ -146,7 +161,7 @@ int MultiStage::Ogl_LoadTexture(String filename, GLenum type, GLenum *tex_id, ch
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
 	}
 	
-	LOG("texture: " << filename << ", " << width << "x" << height << " (" << fimg.GetChannels() << ") --> id " << *tex_id << "\n");
+	LOG("texture: " << filename << ", " << width << "x" << height << " (" << channels << ") --> id " << *tex_id << "\n");
 	
 	return 1;
 }
@@ -179,13 +194,12 @@ GLint MultiStage::Ogl_CompileShader(const GLenum shader_type, String shader_sour
 }
 
 
-GLint MultiStage::Ogl_CompileProgram(String shader_source) {
+bool MultiStage::Ogl_CompileProgram(Stage& s, String shader_source) {
 	GLint frag, program;
-	
 	
 	frag = Ogl_CompileShader(GL_FRAGMENT_SHADER, shader_source);
 	if (frag < 0)
-		return -1;
+		return false;
 		
 	program = glCreateProgram();
 	glProgramParameteri(program, GL_PROGRAM_SEPARABLE, GL_TRUE);
@@ -193,11 +207,13 @@ GLint MultiStage::Ogl_CompileProgram(String shader_source) {
 	glAttachShader(program, frag);
 	glDeleteShader (frag);
 	
-	return program;
+	s.prog[Stage::PROG_FRAGMENT] = program;
+	
+	return true;
 }
 
 bool MultiStage::Ogl_LinkProgram(Stage& s) {
-	GLint program = s.fg_prog;
+	GLint program = s.prog[Stage::PROG_FRAGMENT];
 	GLint status = GL_FALSE;
 	GLint loglen, n_uniforms;
 	

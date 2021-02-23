@@ -11,7 +11,7 @@ void ShaderViewer::Initialize() {
 		path = c[c.GetCount()-1];
 	
 	if (!ms.Load(path))
-		Panic("Couldn't load the dhader");
+		Panic("Couldn't load the shader: " + path);
 	
 }
 
@@ -38,6 +38,7 @@ void ShaderViewer::Render(SystemDraw& draw) {
 
 
 void ShaderViewerStartup() {
+	SetCoutLog();
 	const auto& args = CommandLine();
 	
 	/*if (args.GetCount() == 1) {

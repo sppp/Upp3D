@@ -9,7 +9,7 @@ struct StageInput {
 	int repeat = 1, filter = 1;
 	bool vflip = 0;
 	String filename;
-	GLenum tex;
+	GLenum tex = 0;
 	
 };
 
@@ -20,16 +20,27 @@ struct StageInput {
 struct Stage {
 	Array<StageInput>			in;
 	//Array<StageOutput>		out;
-	GLint						fg_prog = -1;
-	GLint						vx_prog = -1;
-	GLuint						color_buf = 0;
-	GLuint						depth_buf = 0;
-	GLuint						frame_buf = 0;
+	
+	enum {
+		PROG_VERTEX,
+		PROG_FRAGMENT,
+		PROG_GEOMETRY,
+		PROG_TESS_CONTROL,
+		PROG_TESS_EVALUATION,
+		
+		PROG_COUNT
+	};
+	GLint						prog[PROG_COUNT] = {-1,-1};
+	GLuint						color_buf[2] = {0,0};
+	GLuint						depth_buf[2] = {0,0};
+	GLuint						frame_buf[2] = {0,0};
 	String						name;
 	String						description;
 	String						vx_glsl;
 	String						fg_glsl;
 	int							id = -1;
+	int							buf_i = 0;
+	bool						is_doublebuf = false;
 	bool						is_common = false;
 	bool						is_buffer = false;
 	
@@ -55,6 +66,7 @@ class MultiStage {
 	double mouse[4] = {0,0,0,0};
 	int frames = 0;
 	Size size;
+	int fps_limit = 60;
 	
 	Vector<uint32> gl_stages;
 	Array<Stage> passes;
@@ -66,12 +78,12 @@ class MultiStage {
 	
 	int   Ogl_LoadTexture(String filename, GLenum type, GLenum *tex_id, char filter, char repeat, bool flip);
 	GLint Ogl_CompileShader(const GLenum shader_type, String shader_source);
-	GLint Ogl_CompileProgram(String shader_source);
+	bool  Ogl_CompileProgram(Stage& s, String shader_source);
 	bool  Ogl_LinkProgram(Stage& s);
 	void  Ogl_UpdateTexBuffers();
 	
 	void  UpdateTexBuffers();
-	
+	int   GetInputTex(Stage& cur_stage, int input_i) const;
 	
 	
 protected:
@@ -87,6 +99,7 @@ protected:
 	void SetInputType(int pass, int i, int type);
 	void SetInputFilename(int pass, int i, String filename);
 	void SetOutputId(int pass, int id);
+	
 	int GetPassCount() const;
 	Stage& GetStageById(int id) const;
 	
@@ -122,7 +135,7 @@ public:
 	typedef MultiStage CLASSNAME;
 	
 	MultiStage() : size(0,0) {}
-	
+	~MultiStage() {Close();}
 	
 	bool Open(Size output_sz);
 	bool Load(String toy_path);
@@ -136,6 +149,7 @@ public:
 	void KeyboardHandler(unsigned char key, int x, int y);
 	
 	void SetSize(Size sz) {if (is_open && size != sz) {size = sz; UpdateTexBuffers();}}
+	void SetFPS(int fps) {fps_limit = fps;}
 	
 	String GetLastError() const {return last_error;}
 	Size GetSize() const {return size;}

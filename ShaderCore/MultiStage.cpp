@@ -258,7 +258,11 @@ bool MultiStage::Load(String path) {
 }
 
 bool MultiStage::Open(Size output_sz) {
-	ASSERT(!is_open);
+	if (is_open)
+		Close();
+	
+	frames = 0;
+	
 	LOG("MultiStage::Open: size " << output_sz.ToString());
 	if (passes.IsEmpty()) {
 		last_error = "No stages";
@@ -271,7 +275,7 @@ bool MultiStage::Open(Size output_sz) {
 		LOG("\tCompiling stage " << i << ": " << pass.name);
 		
 		if (pass.is_common) {
-			pass.fg_prog = -1;
+			ASSERT(pass.prog[Stage::PROG_FRAGMENT] < 0);
 			continue;
 		}
 		
@@ -285,16 +289,20 @@ bool MultiStage::Open(Size output_sz) {
 		
 		/*
 			TODO
-				iChannelTime
-				iChannelResolution
-		*/
+				iFrameRate			image/buffer		Number of frames rendered per second
+				iChannelTime		image/buffer		Time for channel (if video or sound), in seconds
+				iChannelResolution	image/buffer/sound	Input texture resolution for each channel
 				
-		code =		"#define GL_ES\n"
+
+		*/
+		
+		code =		"#version 430\n"
+					"#define GL_ES\n"
 		
 					"uniform vec3      iResolution;           // viewport resolution (in pixels)\n"
 					"uniform float     iTime;                 // shader playback time (in seconds)\n"
 					"uniform float     iTimeDelta;            // duration since the previous frame (in seconds)\n"
-					"uniform float     iFrame;                // frames since the shader (re)started\n"
+					"uniform int       iFrame;                // frames since the shader (re)started\n"
 					"uniform vec2      iOffset;               \n"
 					"uniform vec4      iMouse;                // mouse pixel coords. xy: current (if MLB down), zw: click\n"
 					"uniform sampler2D iChannel0;             // input channel. XX = 2D/Cube\n"
@@ -302,6 +310,7 @@ bool MultiStage::Open(Size output_sz) {
 					"uniform sampler2D iChannel2;             // input channel. XX = 2D/Cube\n"
 					"uniform sampler2D iChannel3;             // input channel. XX = 2D/Cube\n"
 					"uniform vec4      iDate;                 // (year, month, day, time in secs)\n"
+					"uniform float     iFrameRate;\n"
 					"uniform float     iSampleRate;           // sound sample rate (i.e., 44100)\n"
 					"uniform float     iChannelTime[4];       // channel playback time (in seconds)\n"
 					"uniform vec3      iChannelResolution[4]; // channel resolution (in pixels)\n"
@@ -324,8 +333,7 @@ bool MultiStage::Open(Size output_sz) {
 		
 		//LOG(code);
 		
-		pass.fg_prog = Ogl_CompileProgram(code);
-		if (pass.fg_prog < 0) {
+		if (!Ogl_CompileProgram(pass, code)) {
 			LOG(code);
 			Close();
 			return false;
@@ -380,7 +388,8 @@ bool MultiStage::Open(Size output_sz) {
 				LOG("error: not implemented " << GetInputTypeString(in.type));
 			}
 			else if (in.type == INPUT_BUFFER) {
-				// Nothing to do here
+				if (pass.id == in.id)
+					pass.is_doublebuf = true;
 			}
 			else {
 				Close();
@@ -394,10 +403,15 @@ bool MultiStage::Open(Size output_sz) {
 		Stage& s = passes[i];
 		uint32& gl_s = gl_stages[i];
 		
-		if (s.vx_prog >= 0)
-			glUseProgramStages(gl_s, GL_VERTEX_SHADER_BIT, s.vx_prog);
-		if (s.fg_prog >= 0)
-			glUseProgramStages(gl_s, GL_FRAGMENT_SHADER_BIT, s.fg_prog);
+		for(int j = 0; j < Stage::PROG_COUNT; j++) {
+			GLint& prog = s.prog[j];
+			if (prog >= 0) {
+				int bit = 1 << j;
+				ASSERT(j != Stage::PROG_VERTEX || bit == GL_VERTEX_SHADER_BIT);
+				ASSERT(j != Stage::PROG_FRAGMENT || bit == GL_FRAGMENT_SHADER_BIT);
+				glUseProgramStages(gl_s, bit, prog);
+			}
+		}
 	}
 	
 	size = output_sz;
@@ -411,8 +425,27 @@ bool MultiStage::Open(Size output_sz) {
 }
 
 void MultiStage::Close() {
-	TODO
-	// glDeleteProgramPipelines
+	for(Stage& s : passes) {
+		s.ClearTex();
+		for(int i = 0; i < Stage::PROG_COUNT; i++) {
+			auto& prog = s.prog[i];
+			if (prog >= 0) {
+				glDeleteProgram(prog);
+				prog = -1;
+			}
+		}
+	}
+	
+	if (gl_stages.GetCount()) {
+		glDeleteProgramPipelines(gl_stages.GetCount(), gl_stages.Begin());
+		gl_stages.Clear();
+	}
+	
+	
+	if (is_open) {
+		
+		is_open = false;
+	}
 }
 
 void MultiStage::LeftDown(Point pt, dword keyflags) {
@@ -448,17 +481,22 @@ void MultiStage::Paint() {
 		Stage& pass = passes[i];
 		GLuint gl_stage = gl_stages[i];
 		
-		if (pass.fg_prog < 0)
+		GLint& fg_prog = pass.prog[Stage::PROG_FRAGMENT];
+		if (fg_prog < 0)
 			continue;
 		
-		GLint prog = pass.fg_prog;
+		GLint prog = fg_prog;
 		GLint uindex;
 		
+		int& bi = pass.buf_i;
+		if (pass.is_doublebuf)
+			bi = (bi + 1) % 2;
+		
 		if (pass.is_buffer) {
-			ASSERT(pass.frame_buf > 0);
+			ASSERT(pass.frame_buf[bi] > 0);
 			const GLenum bufs[] = {GL_COLOR_ATTACHMENT0_EXT};
 			// combine FBO
-		    glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, pass.frame_buf);
+		    glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, pass.frame_buf[bi]);
 		    
 		    // set up render target
 		    glDrawBuffers(sizeof bufs / sizeof bufs[0], bufs);
@@ -477,11 +515,7 @@ void MultiStage::Paint() {
 			double elapsed = frame_time.Seconds();
 			fprintf(stderr, "FPS: %.2f\n", 1.0 / elapsed);
 		}
-		/*
-		TODO
-			iChannelTime
-			iChannelResolution
-		*/
+		
 		uindex = glGetUniformLocation(prog, "iResolution");
 		if (uindex >= 0) {
 			if (geometry[0] > 0.1 && geometry[1] > 0.1)
@@ -504,7 +538,7 @@ void MultiStage::Paint() {
 		
 		uindex = glGetUniformLocation(prog, "iFrame");
 		if (uindex >= 0) {
-			glUniform1f(uindex, frames);
+			glUniform1i(uindex, frames);
 		}
 		
 		uindex = glGetUniformLocation(prog, "iMouse");
@@ -535,9 +569,9 @@ void MultiStage::Paint() {
 		uindex = glGetUniformLocation(prog, "iChannel0");
 		if (uindex >= 0) {
 			if (pass.in.GetCount() >= 1) {
-				int tex = pass.in[0].tex;
+				int tex = GetInputTex(pass, 0);
 				glActiveTexture(GL_TEXTURE0 + 0);
-				glBindTexture(GL_TEXTURE_2D, pass.in[0].tex);
+				glBindTexture(GL_TEXTURE_2D, tex);
 				glUniform1i(uindex, GL_TEXTURE0 + 0);
 			}
 		}
@@ -545,8 +579,9 @@ void MultiStage::Paint() {
 		uindex = glGetUniformLocation(prog, "iChannel1");
 		if (uindex >= 0) {
 			if (pass.in.GetCount() >= 2) {
+				int tex = GetInputTex(pass, 1);
 				glActiveTexture(GL_TEXTURE0 + 1);
-				glBindTexture(GL_TEXTURE_2D, pass.in[1].tex);
+				glBindTexture(GL_TEXTURE_2D, tex);
 				glUniform1i(uindex, GL_TEXTURE0 + 1);
 			}
 		}
@@ -554,8 +589,9 @@ void MultiStage::Paint() {
 		uindex = glGetUniformLocation(prog, "iChannel2");
 		if (uindex >= 0) {
 			if (pass.in.GetCount() >= 3) {
+				int tex = GetInputTex(pass, 2);
 				glActiveTexture(GL_TEXTURE0 + 2);
-				glBindTexture(GL_TEXTURE_2D, pass.in[2].tex);
+				glBindTexture(GL_TEXTURE_2D, tex);
 				glUniform1i(uindex, GL_TEXTURE0 + 2);
 			}
 		}
@@ -563,17 +599,34 @@ void MultiStage::Paint() {
 		uindex = glGetUniformLocation(prog, "iChannel3");
 		if (uindex >= 0) {
 			if (pass.in.GetCount() >= 4) {
+				int tex = GetInputTex(pass, 3);
 				glActiveTexture(GL_TEXTURE0 + 3);
-				glBindTexture(GL_TEXTURE_2D, pass.in[3].tex);
+				glBindTexture(GL_TEXTURE_2D, tex);
 				glUniform1i(uindex, GL_TEXTURE0 + 3);
 			}
 		}
+		
+		uindex = glGetUniformLocation(prog, "iFrameRate");
+		if (uindex >= 0) {
+			glUniform1f(uindex, fps_limit);
+		}
+		
+		uindex = glGetUniformLocation(prog, "iChannelTime");
+		if (uindex >= 0) {
+			TODO
+		}
+		
+		uindex = glGetUniformLocation(prog, "iChannelResolution");
+		if (uindex >= 0) {
+			TODO
+		}
+		
 		
 		glClear(GL_COLOR_BUFFER_BIT);
 		glRectf(-1.0, -1.0, 1.0, 1.0);
 		
 		
-		if (pass.frame_buf > 0) {
+		if (pass.frame_buf[bi] > 0) {
 			// backup render target
 		    glDrawBuffer(GL_FRONT);
 		    
@@ -649,6 +702,23 @@ void MultiStage::UpdateTexBuffers() {
 	Ogl_UpdateTexBuffers();
 }
 
+int MultiStage::GetInputTex(Stage& cur_stage, int input_i) const {
+	StageInput& in = cur_stage.in[input_i];
+	int tex;
+	if (in.type == INPUT_BUFFER) {
+		Stage& in_stage = GetStageById(in.id);
+		int buf_i = in_stage.buf_i;
+		if (&in_stage == &cur_stage)
+			buf_i = (buf_i + 1) % 2;
+		ASSERT(in_stage.color_buf[buf_i] > 0);
+		tex = in_stage.color_buf[buf_i];
+	}
+	else {
+		tex = in.tex;
+	}
+	ASSERT(tex != 0);
+	return tex;
+}
 
 
 
@@ -662,13 +732,19 @@ void MultiStage::UpdateTexBuffers() {
 
 
 void Stage::ClearTex() {
-	if (color_buf >= 0) {
-		GLuint i[2] = {color_buf, depth_buf};
-		glDeleteTextures(2, i);
-		glDeleteFramebuffers(1, &frame_buf);
-		color_buf = 0;
-		depth_buf = 0;
-		frame_buf = 0;
+	for(int bi = 0; bi < 2; bi++) {
+		GLuint& color_buf = this->color_buf[bi];
+		GLuint& depth_buf = this->depth_buf[bi];
+		GLuint& frame_buf = this->frame_buf[bi];
+		
+		if (color_buf >= 0) {
+			GLuint i[2] = {color_buf, depth_buf};
+			glDeleteTextures(2, i);
+			glDeleteFramebuffers(1, &frame_buf);
+			color_buf = 0;
+			depth_buf = 0;
+			frame_buf = 0;
+		}
 	}
 }
 
