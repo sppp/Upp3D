@@ -67,8 +67,8 @@ void MultiStage::DumpStages() {
 			if (in.filename.GetCount()) {
 				LOG("\t\tFilename: " << in.filename);
 			}
-			LOG("\t\tRepeat: " << (in.repeat ? "yes" : "no"));
-			LOG("\t\tFilter: " << (in.filter == 0 ? "nearest" : "linear"));
+			LOG("\t\tRepeat: " << in.GetRepeatString());
+			LOG("\t\tFilter: " << in.GetFilterString());
 			LOG("\t\tV-flip: " << (in.vflip ? "yes" : "no"));
 		}
 	}
@@ -336,6 +336,8 @@ bool MultiStage::Open(Size output_sz) {
 			StageInput& in = pass.in[j];
 			if (in.type == INPUT_CUBEMAP)
 				code << "uniform samplerCube iChannel" << IntStr(j) << ";\n";
+			else if (in.type == INPUT_VOLUME)
+				code << "uniform sampler3D iChannel" << IntStr(j) << ";\n";
 			else
 				code << "uniform sampler2D iChannel" << IntStr(j) << ";\n";
 		}
@@ -384,7 +386,10 @@ bool MultiStage::Open(Size output_sz) {
 		for(int j = 0; j < pass.in.GetCount(); j++) {
 			StageInput& in = pass.in[j];
 			LOG("\t\tOpening input " << j << ": " << GetInputTypeString(in.type));
-			if (in.type == INPUT_TEXTURE) {
+			if (in.type == INPUT_INVALID) {
+				
+			}
+			else if (in.type == INPUT_TEXTURE) {
 				if (!Ogl_LoadTexture(in.filename, GL_TEXTURE_2D, &in.tex, in.filter, in.repeat, in.vflip)) {
 					Close();
 					last_error = "Couldn't load texture";
@@ -394,7 +399,14 @@ bool MultiStage::Open(Size output_sz) {
 			else if (in.type == INPUT_CUBEMAP) {
 				if (!Ogl_LoadCubemap(in.filename, &in.tex, in.filter, in.repeat, in.vflip)) {
 					Close();
-					last_error = "Couldn't load texture";
+					last_error = "Couldn't load cubemap";
+					return false;
+				}
+			}
+			else if (in.type == INPUT_VOLUME) {
+				if (!Ogl_LoadVolume(in.filename, &in.tex, in.filter, in.repeat, in.vflip)) {
+					Close();
+					last_error = "Couldn't load volume";
 					return false;
 				}
 			}
@@ -408,9 +420,6 @@ bool MultiStage::Open(Size output_sz) {
 				LOG("error: not implemented " << GetInputTypeString(in.type));
 			}
 			else if (in.type == INPUT_KEYBOARD) {
-				LOG("error: not implemented " << GetInputTypeString(in.type));
-			}
-			else if (in.type == INPUT_VOLUME) {
 				LOG("error: not implemented " << GetInputTypeString(in.type));
 			}
 			else if (in.type == INPUT_VIDEO) {
@@ -600,7 +609,7 @@ void MultiStage::Paint() {
 			if (pass.in.GetCount() >= 1) {
 				int tex = GetInputTex(pass, 0);
 				glActiveTexture(GL_TEXTURE0 + 0);
-				glBindTexture(GL_TEXTURE_2D, tex);
+				glBindTexture(GetTexType(pass, 0), tex);
 				glUniform1i(uindex, GL_TEXTURE0 + 0);
 			}
 		}
@@ -610,7 +619,7 @@ void MultiStage::Paint() {
 			if (pass.in.GetCount() >= 2) {
 				int tex = GetInputTex(pass, 1);
 				glActiveTexture(GL_TEXTURE0 + 1);
-				glBindTexture(GL_TEXTURE_2D, tex);
+				glBindTexture(GetTexType(pass, 1), tex);
 				glUniform1i(uindex, GL_TEXTURE0 + 1);
 			}
 		}
@@ -620,7 +629,7 @@ void MultiStage::Paint() {
 			if (pass.in.GetCount() >= 3) {
 				int tex = GetInputTex(pass, 2);
 				glActiveTexture(GL_TEXTURE0 + 2);
-				glBindTexture(GL_TEXTURE_2D, tex);
+				glBindTexture(GetTexType(pass, 2), tex);
 				glUniform1i(uindex, GL_TEXTURE0 + 2);
 			}
 		}
@@ -630,7 +639,7 @@ void MultiStage::Paint() {
 			if (pass.in.GetCount() >= 4) {
 				int tex = GetInputTex(pass, 3);
 				glActiveTexture(GL_TEXTURE0 + 3);
-				glBindTexture(GL_TEXTURE_2D, tex);
+				glBindTexture(GetTexType(pass, 3), tex);
 				glUniform1i(uindex, GL_TEXTURE0 + 3);
 			}
 		}
@@ -758,6 +767,8 @@ int MultiStage::GetInputTex(Stage& cur_stage, int input_i) const {
 	ASSERT(tex != 0);
 	return tex;
 }
+
+
 
 
 

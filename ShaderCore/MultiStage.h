@@ -21,6 +21,22 @@ struct StageInput {
 		REPEAT_CLAMP,
 		REPEAT_REPEAT,
 	};
+	
+	String GetFilterString() const {
+		switch (filter) {
+			case FILTER_NEAREST: return "nearest";
+			case FILTER_LINEAR: return "linear";
+			case FILTER_MIPMAP: return "mipmap";
+		}
+		return "invalid";
+	}
+	String GetRepeatString() const {
+		switch (repeat) {
+			case REPEAT_CLAMP: return "clamp";
+			case FILTER_LINEAR: return "repeat";
+		}
+		return "invalid";
+	}
 };
 
 /*struct StageOutput {
@@ -87,15 +103,17 @@ class MultiStage {
 	bool is_open = false;
 	
 	int   Ogl_LoadTexture(String filename, GLenum type, GLenum *tex_id, char filter, char repeat, bool flip);
+	int   Ogl_LoadVolume(String filename, GLenum *tex_id, char filter, char repeat, bool flip);
 	int   Ogl_LoadCubemap(String filename, GLenum *tex_id, char filter, char repeat, bool flip);
 	GLint Ogl_CompileShader(const GLenum shader_type, String shader_source);
 	bool  Ogl_CompileProgram(Stage& s, String shader_source);
 	bool  Ogl_LinkProgram(Stage& s);
 	void  Ogl_UpdateTexBuffers();
-	
+	void  Ogl_TexFlags(int type, int filter, int repeat);
 	void  UpdateTexBuffers();
 	int   GetInputTex(Stage& cur_stage, int input_i) const;
-	
+	int   GetTexType(Stage& cur_stage, int input_i) const;
+	int   GetChCode(int channels);
 	
 protected:
 	
@@ -116,7 +134,7 @@ protected:
 	Stage& GetStageById(int id) const;
 	
 	enum {
-		INPUT_INVALID,
+		INPUT_INVALID = -1,
 		INPUT_TEXTURE,
 		INPUT_CUBEMAP,
 		INPUT_WEBCAM,

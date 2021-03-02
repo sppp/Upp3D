@@ -95,14 +95,14 @@ int MultiStage::Ogl_LoadTexture(String filename, GLenum type, GLenum *tex_id, ch
 		if (type == GL_TEXTURE_2D) {
 			glTexImage2D(type, 0, GL_RGBA32F,
 						 width, height,
-						 0, channels == 3 ? GL_RGB : GL_RGBA,
+						 0, GetChCode(channels),
 						 GL_FLOAT,
 						 fimg.Detach());
 		}
 		else if (type == GL_TEXTURE_3D) {
 			glTexImage3D(type, 0, GL_RGBA32F,
 						 width, height, 1,
-						 0, channels == 3 ? GL_RGB : GL_RGBA,
+						 0, GetChCode(channels),
 						 GL_FLOAT,
 						 fimg.Detach());
 		}
@@ -121,43 +121,131 @@ int MultiStage::Ogl_LoadTexture(String filename, GLenum type, GLenum *tex_id, ch
 		if (type == GL_TEXTURE_2D) {
 			glTexImage2D(type, 0, GL_RGBA,
 						 width, height,
-						 0, channels == 3 ? GL_RGB : GL_RGBA,
+						 0, GetChCode(channels),
 						 GL_UNSIGNED_BYTE,
 						 bimg.Detach());
 		}
 		else if (type == GL_TEXTURE_3D) {
 			glTexImage3D(type, 0, GL_RGBA,
 						 width, height, 1,
-						 0, channels == 3 ? GL_RGB : GL_RGBA,
+						 0, GetChCode(channels),
 						 GL_UNSIGNED_BYTE,
 						 bimg.Detach());
 		}
 	}
 	
-	if (filter == 0) {
-		glTexParameteri(type, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-		glTexParameteri(type, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	}
-	else {
-		glTexParameteri(type, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-		glTexParameteri(type, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-		glGenerateMipmap(type);
+	Ogl_TexFlags(type, filter, repeat);
+	
+	
+	LOG("\t\t\ttexture: " << filename << ", " << width << "x" << height << " (" << channels << ") --> id " << *tex_id << "\n");
+	
+	GLenum err = glGetError();
+	if (err != GL_NO_ERROR) {
+		LOG("error: " << HexStr(err));
+		glBindTexture(type, 0);
+		return 0;
 	}
 	
-	if (repeat) {
-		glTexParameteri(type, GL_TEXTURE_WRAP_S, GL_REPEAT);
-		glTexParameteri(type, GL_TEXTURE_WRAP_T, GL_REPEAT);
-	}
-	else {
-		glTexParameteri(type, GL_TEXTURE_WRAP_S, GL_CLAMP);
-		glTexParameteri(type, GL_TEXTURE_WRAP_T, GL_CLAMP);
-	}
-	
-	LOG("texture: " << filename << ", " << width << "x" << height << " (" << channels << ") --> id " << *tex_id << "\n");
-	
+	glBindTexture(type, 0);
 	return 1;
 }
 
+int MultiStage::Ogl_LoadVolume(String filename, GLenum *tex_id, char filter, char repeat, bool flip) {
+	ASSERT(glGetError() == GL_NO_ERROR);
+	
+	String s = LoadFile(filename);
+	if (s.IsEmpty()) {
+		LOG("error: couldn't load file " << filename);
+		return 0;
+	}
+	Vector<byte> values;
+	MemReadStream data(s.Begin(), s.GetCount());
+	int magic, w, h, d, channels, sz;
+	data.Get(&magic, 4); // "BIN "
+	if (magic == 0x004e4942) {
+		data.Get(&w, 4);
+		data.Get(&h, 4);
+		data.Get(&d, 4);
+		data.Get(&channels, 4);
+		sz = w * h * d * channels;
+		values.SetCount(sz);
+		data.Get(values.Begin(), sz);
+	}
+	else {
+		int len = 0;
+		for(int i = 1; i <= 4; i++) {
+			int per_ch = s.GetCount() / i;
+			int root = pow(per_ch, 1.0/3.0);
+			int test_sz = root * root * root * i;
+			if (test_sz == s.GetCount()) {
+				channels = i;
+				len = root;
+				break;
+			}
+		}
+		if (channels <= 0 || len <= 0) {
+			LOG("error: couldn't get volume data dimensions");
+			return 0;
+		}
+		w = h = d = len;
+		sz = w * h * d * channels;
+		values.SetCount(sz);
+		MemoryCopy(values.Begin(), s.Begin(), sz);
+	}
+	
+	int intl_fmt = GetChCode(channels);
+	
+	//glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+	//glPixelStorei(GL_PACK_ALIGNMENT, 1);
+	
+	glGenTextures(1, tex_id);
+	glBindTexture(GL_TEXTURE_3D, *tex_id);
+	
+	GLenum err;
+	
+	err = glGetError();
+	if (err != GL_NO_ERROR) {
+		LOG("error: " << HexStr(err));
+		glBindTexture(GL_TEXTURE_3D, 0);
+		return 0;
+	}
+	
+	byte* tmp_data = (byte*)malloc(sz);
+	memcpy(tmp_data, values.Begin(), sz);
+	
+	if (1) {
+		glTexImage3D(GL_TEXTURE_3D, 0, GL_RGBA32F,
+					 w, h, d,
+					 0, intl_fmt,
+					 GL_UNSIGNED_BYTE,
+					 tmp_data);
+	}
+	else {
+		glTexStorage3D(GL_TEXTURE_3D, 1, GL_R8, w, h, d);
+		glTexSubImage3D(GL_TEXTURE_3D, 0, 0, 0, 0, w, h, d, intl_fmt, GL_UNSIGNED_SHORT, (void*)tmp_data);
+	}
+	
+	err = glGetError();
+	if (err != GL_NO_ERROR) {
+		LOG("error: " << HexStr(err));
+		glBindTexture(GL_TEXTURE_3D, 0);
+		return 0;
+	}
+	
+	Ogl_TexFlags(GL_TEXTURE_3D, filter, repeat);
+	
+	err = glGetError();
+	if (err != GL_NO_ERROR) {
+		LOG("error: " << HexStr(err));
+		glBindTexture(GL_TEXTURE_3D, 0);
+		return 0;
+	}
+	
+	LOG("\t\t\ttexture: " << filename << ", " << w << "x" << h << "x" << d << " (" << channels << ") --> id " << *tex_id << "\n");
+	
+	glBindTexture(GL_TEXTURE_3D, 0);
+	return 1;
+}
 
 int MultiStage::Ogl_LoadCubemap(String filename, GLenum *tex_id, char filter, char repeat, bool flip) {
 	String dir = GetFileDirectory(filename);
@@ -179,6 +267,7 @@ int MultiStage::Ogl_LoadCubemap(String filename, GLenum *tex_id, char filter, ch
 		Image img = StreamRaster::LoadFileAny(path);
 		if (!img) {
 			LOG("error: couldn't load file " << path);
+			glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
 			return 0;
 		}
 		
@@ -186,6 +275,7 @@ int MultiStage::Ogl_LoadCubemap(String filename, GLenum *tex_id, char filter, ch
 		int height = img.GetHeight();
 		if (!width || !height) {
 			LOG("error: empty image " << path);
+			glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
 			return 0;
 		}
 		
@@ -199,7 +289,7 @@ int MultiStage::Ogl_LoadCubemap(String filename, GLenum *tex_id, char filter, ch
 			ASSERT(fimg.GetDataSize() == width * height * channels);
 			glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, GL_RGBA32F,
 						 width, height,
-						 0, channels == 3 ? GL_RGB : GL_RGBA,
+						 0, GetChCode(channels),
 						 GL_FLOAT,
 						 fimg.Detach());
 		}
@@ -213,43 +303,52 @@ int MultiStage::Ogl_LoadCubemap(String filename, GLenum *tex_id, char filter, ch
 			ASSERT(bimg.GetWidth() == width);
 			ASSERT(bimg.GetHeight() == height);
 			ASSERT(sz == exp_sz);
-			glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, GL_RGBA,
+			glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, GL_RGBA32F,
 						 width, height,
-						 0, channels == 3 ? GL_RGB : GL_RGBA,
+						 0, GetChCode(channels),
 						 GL_UNSIGNED_BYTE,
 						 bimg.Detach());
 		}
 		
 		
-		LOG("texture #" << i << ": " << path << ", " << width << "x" << height << " (" << channels << ") --> id " << *tex_id);
+		LOG("\t\t\ttexture #" << i << ": " << path << ", " << width << "x" << height << " (" << channels << ") --> id " << *tex_id);
 	}
 	
-	if (filter == StageInput::FILTER_NEAREST) {
-		glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-		glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	}
-	else if (filter == StageInput::FILTER_LINEAR) {
-		glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-		glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-	}
-	else if (filter == StageInput::FILTER_MIPMAP) {
-		glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-		glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-		glGenerateMipmap(GL_TEXTURE_CUBE_MAP);
-	}
+	Ogl_TexFlags(GL_TEXTURE_CUBE_MAP, filter, repeat);
 	
-	if (repeat == StageInput::REPEAT_REPEAT) {
-		glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_REPEAT);
-		glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_REPEAT);
-	}
-	else if (repeat == StageInput::REPEAT_CLAMP) {
-		glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP);
-		glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP);
-	}
+	glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
 	
 	return 1;
 }
 
+void MultiStage::Ogl_TexFlags(int type, int filter, int repeat) {
+	if (filter == StageInput::FILTER_NEAREST) {
+		glTexParameteri(type, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glTexParameteri(type, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	}
+	else if (filter == StageInput::FILTER_LINEAR) {
+		glTexParameteri(type, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(type, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	}
+	else if (filter == StageInput::FILTER_MIPMAP) {
+		glTexParameteri(type, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(type, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+		glGenerateMipmap(type);
+	}
+	
+	if (repeat == StageInput::REPEAT_REPEAT) {
+		glTexParameteri(type, GL_TEXTURE_WRAP_S, GL_REPEAT);
+		glTexParameteri(type, GL_TEXTURE_WRAP_T, GL_REPEAT);
+		if (type == GL_TEXTURE_3D)
+			glTexParameteri(type, GL_TEXTURE_WRAP_R, GL_REPEAT);
+	}
+	else if (repeat == StageInput::REPEAT_CLAMP) {
+		glTexParameteri(type, GL_TEXTURE_WRAP_S, GL_CLAMP);
+		glTexParameteri(type, GL_TEXTURE_WRAP_T, GL_CLAMP);
+		if (type == GL_TEXTURE_3D)
+			glTexParameteri(type, GL_TEXTURE_WRAP_R, GL_CLAMP);
+	}
+}
 
 GLint MultiStage::Ogl_CompileShader(const GLenum shader_type, String shader_source) {
 	GLuint shader = glCreateShader(shader_type);
@@ -332,5 +431,27 @@ bool MultiStage::Ogl_LinkProgram(Stage& s) {
 }
 
 
+int MultiStage::GetTexType(Stage& cur_stage, int input_i) const {
+	StageInput& in = cur_stage.in[input_i];
+	if (in.type == INPUT_VOLUME) {
+		return GL_TEXTURE_3D;
+	}
+	else if (in.type == INPUT_CUBEMAP) {
+		return GL_TEXTURE_CUBE_MAP;
+	}
+	else {
+		return GL_TEXTURE_2D;
+	}
+}
+
+int MultiStage::GetChCode(int channels) {
+	switch (channels) {
+		case 1: return GL_RED;
+		case 2: return GL_RG;
+		case 3: return GL_RGB;
+		case 4: return GL_RGBA;
+	}
+	return 0;
+}
 
 NAMESPACE_SHADER_END
