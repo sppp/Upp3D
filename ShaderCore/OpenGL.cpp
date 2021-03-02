@@ -77,91 +77,175 @@ int MultiStage::Ogl_LoadTexture(String filename, GLenum type, GLenum *tex_id, ch
 		return 0;
 	}
 	
-	/*
-	
-	int rowstride;
-	int cpp, bps;
-	int x, y, c;
-	
-	int pitch = fimg.GetPitch();
-	int bps = fimg.GetChannels();
-	bps = gdk_pixbuf_get_bits_per_sample(pixbuf);
-	cpp = gdk_pixbuf_get_n_channels(pixbuf);
-	
-	if (bps != 8 && bps != 16) {
-		fprintf(stderr, "unexpected bits per sample: %d (%s)\n", bps, filename.c_str());
-		return 0;
-	}
-	
-	if (cpp != 3 && cpp != 4) {
-		fprintf(stderr, "unexpected n_channels: %d\n", cpp);
-		return 0;
-	}
-	
-	tex_data = (GLfloat*)malloc(width * height * cpp * sizeof(GLfloat));
-	for (y = 0; y < height; y++) {
-		int y2 = flip ? (height - 1 - y) : y;
-		uint8_t  *cur_row8  = (uint8_t *)(data + y2 * pitch);
-		uint16_t *cur_row16 = (uint16_t *)(data + y2 * pitch);
-		
-		for (x = 0; x < width; x++) {
-			for (c = 0; c < cpp; c++) {
-				if (bps == 8)
-					tex_data[(y * width + x) * cpp + c] = ((GLfloat) cur_row8[x * cpp + c]) / 255.0;
-				else
-					tex_data[(y * width + x) * cpp + c] = ((GLfloat) cur_row16[x * cpp + c]) / 65535.0;
-			}
-		}
-	}*/
-	
-	
 	glGenTextures(1, tex_id);
 	glBindTexture(type, *tex_id);
 	
 	int channels = 0;
+	
+
+	// Float or byte based image transfer. Both work.
+	// Byte-based might be slightly less resource-demanding.
 	if (0) {
 		FloatImage fimg = img;
+		if (flip)
+			fimg.FlipVert();
 		channels = fimg.GetChannels();
 		ASSERT(channels >= 3 && channels <= 4);
-		ASSERT(fimg.GetSize() == width * height * channels);
-		glTexImage2D(type, 0, GL_RGBA32F,
-					 width, height,
-					 0, channels == 3 ? GL_RGB : GL_RGBA,
-					 GL_FLOAT,
-					 fimg.Detach());
+		ASSERT(fimg.GetDataSize() == width * height * channels);
+		if (type == GL_TEXTURE_2D) {
+			glTexImage2D(type, 0, GL_RGBA32F,
+						 width, height,
+						 0, channels == 3 ? GL_RGB : GL_RGBA,
+						 GL_FLOAT,
+						 fimg.Detach());
+		}
+		else if (type == GL_TEXTURE_3D) {
+			glTexImage3D(type, 0, GL_RGBA32F,
+						 width, height, 1,
+						 0, channels == 3 ? GL_RGB : GL_RGBA,
+						 GL_FLOAT,
+						 fimg.Detach());
+		}
 	}
 	else {
 		ByteImage bimg = img;
+		if (flip)
+			bimg.FlipVert();
 		channels = bimg.GetChannels();
+		int sz = bimg.GetSize();
+		int exp_sz = width * height * channels;
 		ASSERT(channels >= 3 && channels <= 4);
-		ASSERT(bimg.GetSize() == width * height * channels);
-		glTexImage2D(type, 0, GL_RGBA,
-					 width, height,
-					 0, channels == 3 ? GL_RGB : GL_RGBA,
-					 GL_UNSIGNED_BYTE,
-					 bimg.Detach());
+		ASSERT(bimg.GetWidth() == width);
+		ASSERT(bimg.GetHeight() == height);
+		ASSERT(sz == exp_sz);
+		if (type == GL_TEXTURE_2D) {
+			glTexImage2D(type, 0, GL_RGBA,
+						 width, height,
+						 0, channels == 3 ? GL_RGB : GL_RGBA,
+						 GL_UNSIGNED_BYTE,
+						 bimg.Detach());
+		}
+		else if (type == GL_TEXTURE_3D) {
+			glTexImage3D(type, 0, GL_RGBA,
+						 width, height, 1,
+						 0, channels == 3 ? GL_RGB : GL_RGBA,
+						 GL_UNSIGNED_BYTE,
+						 bimg.Detach());
+		}
 	}
 	
 	if (filter == 0) {
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glTexParameteri(type, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glTexParameteri(type, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	}
 	else {
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-		glGenerateMipmap(GL_TEXTURE_2D);
+		glTexParameteri(type, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(type, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+		glGenerateMipmap(type);
 	}
 	
 	if (repeat) {
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+		glTexParameteri(type, GL_TEXTURE_WRAP_S, GL_REPEAT);
+		glTexParameteri(type, GL_TEXTURE_WRAP_T, GL_REPEAT);
 	}
 	else {
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
+		glTexParameteri(type, GL_TEXTURE_WRAP_S, GL_CLAMP);
+		glTexParameteri(type, GL_TEXTURE_WRAP_T, GL_CLAMP);
 	}
 	
 	LOG("texture: " << filename << ", " << width << "x" << height << " (" << channels << ") --> id " << *tex_id << "\n");
+	
+	return 1;
+}
+
+
+int MultiStage::Ogl_LoadCubemap(String filename, GLenum *tex_id, char filter, char repeat, bool flip) {
+	String dir = GetFileDirectory(filename);
+	String title = GetFileTitle(filename);
+	String ext = GetFileExt(filename);
+	
+	glGenTextures(1, tex_id);
+	glBindTexture(GL_TEXTURE_CUBE_MAP, *tex_id);
+	
+	int channels = 0;
+	
+	for(int i = 0; i < 6; i++) {
+		String path;
+		if (!i)
+			path = filename;
+		else
+			path = AppendFileName(dir, title + "_" + IntStr(i) + ext);
+		
+		Image img = StreamRaster::LoadFileAny(path);
+		if (!img) {
+			LOG("error: couldn't load file " << path);
+			return 0;
+		}
+		
+		int width = img.GetWidth();
+		int height = img.GetHeight();
+		if (!width || !height) {
+			LOG("error: empty image " << path);
+			return 0;
+		}
+		
+		// Float or byte based image transfer. Both work.
+		// Byte-based might be slightly less resource-demanding.
+		if (0) {
+			FloatImage fimg = img;
+			//if (!flip) fimg.FlipVert();
+			channels = fimg.GetChannels();
+			ASSERT(channels >= 3 && channels <= 4);
+			ASSERT(fimg.GetDataSize() == width * height * channels);
+			glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, GL_RGBA32F,
+						 width, height,
+						 0, channels == 3 ? GL_RGB : GL_RGBA,
+						 GL_FLOAT,
+						 fimg.Detach());
+		}
+		else {
+			ByteImage bimg = img;
+			//if (!flip) bimg.FlipVert();
+			channels = bimg.GetChannels();
+			int sz = bimg.GetSize();
+			int exp_sz = width * height * channels;
+			ASSERT(channels >= 3 && channels <= 4);
+			ASSERT(bimg.GetWidth() == width);
+			ASSERT(bimg.GetHeight() == height);
+			ASSERT(sz == exp_sz);
+			glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, GL_RGBA,
+						 width, height,
+						 0, channels == 3 ? GL_RGB : GL_RGBA,
+						 GL_UNSIGNED_BYTE,
+						 bimg.Detach());
+		}
+		
+		
+		LOG("texture #" << i << ": " << path << ", " << width << "x" << height << " (" << channels << ") --> id " << *tex_id);
+	}
+	
+	if (filter == StageInput::FILTER_NEAREST) {
+		glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	}
+	else if (filter == StageInput::FILTER_LINEAR) {
+		glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	}
+	else if (filter == StageInput::FILTER_MIPMAP) {
+		glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+		glGenerateMipmap(GL_TEXTURE_CUBE_MAP);
+	}
+	
+	if (repeat == StageInput::REPEAT_REPEAT) {
+		glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_REPEAT);
+		glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_REPEAT);
+	}
+	else if (repeat == StageInput::REPEAT_CLAMP) {
+		glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP);
+		glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP);
+	}
 	
 	return 1;
 }

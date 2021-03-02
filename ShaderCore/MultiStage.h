@@ -6,11 +6,21 @@ NAMESPACE_SHADER_BEGIN
 struct StageInput {
 	int id = -1;
 	int type = -1;
-	int repeat = 1, filter = 1;
+	int repeat = REPEAT_REPEAT, filter = FILTER_LINEAR;
 	bool vflip = 0;
 	String filename;
 	GLenum tex = 0;
 	
+	enum {
+		FILTER_NEAREST,
+		FILTER_LINEAR,
+		FILTER_MIPMAP
+	};
+	
+	enum {
+		REPEAT_CLAMP,
+		REPEAT_REPEAT,
+	};
 };
 
 /*struct StageOutput {
@@ -77,6 +87,7 @@ class MultiStage {
 	bool is_open = false;
 	
 	int   Ogl_LoadTexture(String filename, GLenum type, GLenum *tex_id, char filter, char repeat, bool flip);
+	int   Ogl_LoadCubemap(String filename, GLenum *tex_id, char filter, char repeat, bool flip);
 	GLint Ogl_CompileShader(const GLenum shader_type, String shader_source);
 	bool  Ogl_CompileProgram(Stage& s, String shader_source);
 	bool  Ogl_LinkProgram(Stage& s);
@@ -98,6 +109,7 @@ protected:
 	void SetInputId(int pass, int i, int id);
 	void SetInputType(int pass, int i, int type);
 	void SetInputFilename(int pass, int i, String filename);
+	void SetInputValue(int pass, int i, int filter, int wrap, int vflip);
 	void SetOutputId(int pass, int id);
 	
 	int GetPassCount() const;

@@ -534,6 +534,22 @@ CONSOLE_APP_MAIN
 				fout << pre << "id = " << id_i << "\n";
 				fout << pre << "type = " << type << "\n";
 				
+				int k = input.Find("sampler");
+				if (k >= 0) {
+					ValueMap sampler = input.GetValue(k);
+					int filter_i = sampler.Find("filter");
+					int wrap_i = sampler.Find("wrap");
+					int vflip_i = sampler.Find("vflip");
+					//String srgb = sampler.GetAdd("srgb");
+					//String internal = sampler.GetAdd("internal");
+					if (filter_i >= 0)
+						fout << pre << "filter = " << sampler.GetValue(filter_i) << "\n";
+					if (wrap_i >= 0)
+						fout << pre << "wrap = " << sampler.GetValue(wrap_i) << "\n";
+					if (vflip_i >= 0)
+						fout << pre << "vflip = " << sampler.GetValue(vflip_i) << "\n";
+				}
+				
 				required_types.FindAdd(type);
 				
 				if (filepath.Find("/media/a/") == 0 && filepath.Find("media/previz/") == -1) {

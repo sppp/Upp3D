@@ -199,6 +199,26 @@ bool MultiStage::Load(String path) {
 							LOG("File doesn't exist: " << filename);
 						}
 					}
+					else if (key == "filter") {
+						if (value == "nearest")
+							SetInputValue(pass_i, io_i, StageInput::FILTER_NEAREST, -1, -1);
+						else if (value == "linear")
+							SetInputValue(pass_i, io_i, StageInput::FILTER_LINEAR, -1, -1);
+						else if (value == "mipmap")
+							SetInputValue(pass_i, io_i, StageInput::FILTER_MIPMAP, -1, -1);
+					}
+					else if (key == "wrap") {
+						if (value == "repeat")
+							SetInputValue(pass_i, io_i, -1, StageInput::REPEAT_REPEAT, -1);
+						else if (value == "clamp")
+							SetInputValue(pass_i, io_i, -1, StageInput::REPEAT_CLAMP, -1);
+					}
+					else if (key == "vflip") {
+						if (value == "true" || value == "1")
+							SetInputValue(pass_i, io_i, -1, -1, true);
+						else if (value == "false" || value == "0")
+							SetInputValue(pass_i, io_i, -1, -1, false);
+					}
 					else {
 						LOG("Invalid key: " << key);
 						return false;
@@ -305,17 +325,22 @@ bool MultiStage::Open(Size output_sz) {
 					"uniform int       iFrame;                // frames since the shader (re)started\n"
 					"uniform vec2      iOffset;               \n"
 					"uniform vec4      iMouse;                // mouse pixel coords. xy: current (if MLB down), zw: click\n"
-					"uniform sampler2D iChannel0;             // input channel. XX = 2D/Cube\n"
-					"uniform sampler2D iChannel1;             // input channel. XX = 2D/Cube\n"
-					"uniform sampler2D iChannel2;             // input channel. XX = 2D/Cube\n"
-					"uniform sampler2D iChannel3;             // input channel. XX = 2D/Cube\n"
 					"uniform vec4      iDate;                 // (year, month, day, time in secs)\n"
 					"uniform float     iFrameRate;\n"
 					"uniform float     iSampleRate;           // sound sample rate (i.e., 44100)\n"
 					"uniform float     iChannelTime[4];       // channel playback time (in seconds)\n"
 					"uniform vec3      iChannelResolution[4]; // channel resolution (in pixels)\n"
-					"\n";
-			
+					;
+		
+		for(int j = 0; j < pass.in.GetCount(); j++) {
+			StageInput& in = pass.in[j];
+			if (in.type == INPUT_CUBEMAP)
+				code << "uniform samplerCube iChannel" << IntStr(j) << ";\n";
+			else
+				code << "uniform sampler2D iChannel" << IntStr(j) << ";\n";
+		}
+		code << "\n";
+		
 		for(int j = 0; j < passes.GetCount(); j++) {
 			Stage& pass0 = passes[j];
 			if (pass0.is_common)
@@ -367,7 +392,11 @@ bool MultiStage::Open(Size output_sz) {
 				}
 			}
 			else if (in.type == INPUT_CUBEMAP) {
-				LOG("error: not implemented " << GetInputTypeString(in.type));
+				if (!Ogl_LoadCubemap(in.filename, &in.tex, in.filter, in.repeat, in.vflip)) {
+					Close();
+					last_error = "Couldn't load texture";
+					return false;
+				}
 			}
 			else if (in.type == INPUT_WEBCAM) {
 				LOG("error: not implemented " << GetInputTypeString(in.type));
@@ -680,6 +709,16 @@ void MultiStage::SetInputType(int pass, int i, int type) {
 
 void MultiStage::SetInputFilename(int pass, int i, String filename) {
 	passes[pass].in[i].filename = filename;
+}
+
+void MultiStage::SetInputValue(int pass, int i, int filter, int wrap, int vflip) {
+	auto& in = passes[pass].in[i];
+	if (filter >= 0)
+		in.filter = filter;
+	if (wrap >= 0)
+		in.repeat = wrap;
+	if (vflip >= 0)
+		in.vflip = vflip;
 }
 
 void MultiStage::SetOutputId(int pass, int id) {
