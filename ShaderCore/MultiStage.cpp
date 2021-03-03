@@ -610,7 +610,7 @@ void MultiStage::Paint() {
 				int tex = GetInputTex(pass, 0);
 				glActiveTexture(GL_TEXTURE0 + 0);
 				glBindTexture(GetTexType(pass, 0), tex);
-				glUniform1i(uindex, GL_TEXTURE0 + 0);
+				glUniform1i(uindex, 0);
 			}
 		}
 		
@@ -620,7 +620,7 @@ void MultiStage::Paint() {
 				int tex = GetInputTex(pass, 1);
 				glActiveTexture(GL_TEXTURE0 + 1);
 				glBindTexture(GetTexType(pass, 1), tex);
-				glUniform1i(uindex, GL_TEXTURE0 + 1);
+				glUniform1i(uindex, 1);
 			}
 		}
 		
@@ -630,7 +630,7 @@ void MultiStage::Paint() {
 				int tex = GetInputTex(pass, 2);
 				glActiveTexture(GL_TEXTURE0 + 2);
 				glBindTexture(GetTexType(pass, 2), tex);
-				glUniform1i(uindex, GL_TEXTURE0 + 2);
+				glUniform1i(uindex, 2);
 			}
 		}
 		
@@ -640,7 +640,7 @@ void MultiStage::Paint() {
 				int tex = GetInputTex(pass, 3);
 				glActiveTexture(GL_TEXTURE0 + 3);
 				glBindTexture(GetTexType(pass, 3), tex);
-				glUniform1i(uindex, GL_TEXTURE0 + 3);
+				glUniform1i(uindex, 3);
 			}
 		}
 		
