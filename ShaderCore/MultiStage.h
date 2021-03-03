@@ -102,6 +102,17 @@ class MultiStage {
 	int last_time = 0;
 	bool is_open = false;
 	
+	VideoDeviceManager vidmgr;
+	VideoCaptureDevice* cap = 0;
+	GLuint cap_tex[2] = {0,0};
+	int cap_tex_i = 0;
+	Size def_cap_sz;
+	int def_cap_fps;
+	bool uses_webcam;
+	RunningFlagSingle webcam_flag;
+	Vector<GLuint*> tgt_tex;
+	
+	
 	int   Ogl_LoadTexture(String filename, GLenum type, GLenum *tex_id, char filter, char repeat, bool flip);
 	int   Ogl_LoadVolume(String filename, GLenum *tex_id, char filter, char repeat, bool flip);
 	int   Ogl_LoadCubemap(String filename, GLenum *tex_id, char filter, char repeat, bool flip);
@@ -114,6 +125,10 @@ class MultiStage {
 	int   GetInputTex(Stage& cur_stage, int input_i) const;
 	int   GetTexType(Stage& cur_stage, int input_i) const;
 	int   GetChCode(int channels);
+	
+	void StartWebcamThread();
+	void StopWebcamThread();
+	void ProcessWebcamThread();
 	
 protected:
 	
@@ -164,7 +179,7 @@ protected:
 public:
 	typedef MultiStage CLASSNAME;
 	
-	MultiStage() : size(0,0) {}
+	MultiStage() : size(0,0), def_cap_sz(1280,720), def_cap_fps(30) {}
 	~MultiStage() {Close();}
 	
 	bool Open(Size output_sz);

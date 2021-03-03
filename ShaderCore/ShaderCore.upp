@@ -1,7 +1,8 @@
 description "\377B255,0,255";
 
 uses
-	Sppp;
+	Sppp,
+	ComputerVision;
 
 file
 	main.cpp,

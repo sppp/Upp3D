@@ -289,6 +289,44 @@ bool MultiStage::Open(Size output_sz) {
 		return false;
 	}
 	
+	bool uses_webcam = false;
+	for (Stage& s : passes)
+		for (StageInput& i : s.in)
+			if (i.type == INPUT_WEBCAM)
+				uses_webcam = true;
+	
+	if (uses_webcam) {
+		ASSERT(!cap);
+		vidmgr.Refresh();
+		
+		for(int k = 0; k < vidmgr.GetCount() && !cap; k++) {
+			VideoDevice& dev = vidmgr[k];
+			for(int l = 0; l < dev.GetCaptureCount() && !cap; l++) {
+				VideoCaptureDevice& cap = dev.GetCapture(l);
+				int fmt, res;
+				if (cap.FindClosestFormat(def_cap_sz, def_cap_fps, 0.5, 1.5, fmt, res)) {
+					if (cap.Open(fmt, res)) {
+						this->cap = &cap;
+						glGenTextures(2, cap_tex);
+					}
+					else {
+						LOG("error: couldn't open webcam " << cap.GetPath());
+					}
+				}
+				else {
+					LOG("info: couldn't find expected format " << def_cap_sz.ToString() << ", " << def_cap_fps << "fps from webcam " << cap.GetPath());
+				}
+			}
+		}
+		
+		if (!cap) {
+			LOG("error: couldn't find webcam with expected format " << def_cap_sz.ToString() << ", " << def_cap_fps << "fps");
+			return false;
+		}
+		
+		StartWebcamThread();
+	}
+	
 	
 	for(int i = 0; i < passes.GetCount(); i++) {
 		Stage& pass = passes[i];
@@ -332,12 +370,16 @@ bool MultiStage::Open(Size output_sz) {
 					"uniform vec3      iChannelResolution[4]; // channel resolution (in pixels)\n"
 					;
 		
-		for(int j = 0; j < pass.in.GetCount(); j++) {
-			StageInput& in = pass.in[j];
-			if (in.type == INPUT_CUBEMAP)
-				code << "uniform samplerCube iChannel" << IntStr(j) << ";\n";
-			else if (in.type == INPUT_VOLUME)
-				code << "uniform sampler3D iChannel" << IntStr(j) << ";\n";
+		for(int j = 0; j < 4; j++) {
+			if (j < pass.in.GetCount()) {
+				StageInput& in = pass.in[j];
+				if (in.type == INPUT_CUBEMAP)
+					code << "uniform samplerCube iChannel" << IntStr(j) << ";\n";
+				else if (in.type == INPUT_VOLUME)
+					code << "uniform sampler3D iChannel" << IntStr(j) << ";\n";
+				else
+					code << "uniform sampler2D iChannel" << IntStr(j) << ";\n";
+			}
 			else
 				code << "uniform sampler2D iChannel" << IntStr(j) << ";\n";
 		}
@@ -411,7 +453,10 @@ bool MultiStage::Open(Size output_sz) {
 				}
 			}
 			else if (in.type == INPUT_WEBCAM) {
-				LOG("error: not implemented " << GetInputTypeString(in.type));
+				if (cap && cap_tex[cap_tex_i] > 0) {
+					in.tex = cap_tex[cap_tex_i];
+					tgt_tex.Add(&in.tex);
+				}
 			}
 			else if (in.type == INPUT_MUSIC) {
 				LOG("error: not implemented " << GetInputTypeString(in.type));
@@ -463,6 +508,19 @@ bool MultiStage::Open(Size output_sz) {
 }
 
 void MultiStage::Close() {
+	StopWebcamThread();
+	tgt_tex.Clear();
+	
+	if (cap) {
+		cap->Close();
+		cap = 0;
+	}
+	if (cap_tex[0] > 0) {
+		glDeleteTextures(2, cap_tex);
+		cap_tex[0] = 0;
+		cap_tex[1] = 0;
+	}
+	
 	for(Stage& s : passes) {
 		s.ClearTex();
 		for(int i = 0; i < Stage::PROG_COUNT; i++) {
@@ -514,6 +572,14 @@ void MultiStage::MouseMove(Point pt, dword keyflags) {
 
 void MultiStage::Paint() {
 	Time now = GetSysTime();
+	
+	if (cap) {
+		GLuint active_tex = cap_tex[cap_tex_i];
+		cap->PaintOpenGLTexture(active_tex);
+		for(GLuint* i : tgt_tex)
+			*i = active_tex;
+		cap_tex_i = (cap_tex_i + 1) % 2;
+	}
 	
 	for(int i = 0; i < passes.GetCount(); i++) {
 		Stage& pass = passes[i];
@@ -766,6 +832,26 @@ int MultiStage::GetInputTex(Stage& cur_stage, int input_i) const {
 	}
 	ASSERT(tex != 0);
 	return tex;
+}
+
+void MultiStage::StartWebcamThread() {
+	StopWebcamThread();
+	webcam_flag.Start();
+	Thread::Start(THISBACK(ProcessWebcamThread));
+}
+
+void MultiStage::StopWebcamThread() {
+	webcam_flag.Stop();
+}
+
+void MultiStage::ProcessWebcamThread() {
+	
+	if (cap && cap_tex[0] > 0) {
+		while (cap && cap->IsOpen() && webcam_flag.IsRunning())
+			cap->Read();
+	}
+	
+	webcam_flag.SetStopped();
 }
 
 

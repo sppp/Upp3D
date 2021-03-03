@@ -8,6 +8,7 @@
 #include <stdio.h>  // vsnprintf
 
 #include <Sppp/Sppp.h>
+#include <Multimedia/Multimedia.h>
 
 #define NAMESPACE_SHADER_BEGIN namespace Sppp { namespace ShaderCore {
 #define NAMESPACE_SHADER_END   }}
