@@ -396,9 +396,11 @@ bool MultiStage::Open(Size output_sz) {
 		code +=		"\nvoid main (void) {\n"
 					"	vec4 color = vec4 (0.0, 0.0, 0.0, 1.0);\n"
 					"	mainImage (color, gl_FragCoord.xy);\n"
-					"	color.w = 1.0;\n"
 					"	gl_FragColor = color;\n"
 					"}\n\n";
+		
+		// Hotfixes
+		code.Replace("precision float;", "");
 		
 		//LOG(code);
 		
@@ -471,6 +473,8 @@ bool MultiStage::Open(Size output_sz) {
 				LOG("error: not implemented " << GetInputTypeString(in.type));
 			}
 			else if (in.type == INPUT_BUFFER) {
+				Stage& s = GetStageById(in.id);
+				LOG("\t\t\tbuffer " << s.name);
 				if (pass.id == in.id)
 					pass.is_doublebuf = true;
 			}

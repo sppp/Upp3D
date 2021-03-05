@@ -77,12 +77,7 @@ struct Stage {
 	bool operator()(const Stage& a, const Stage& b) const {
 		if (a.name == "Image") return 0;
 		if (b.name == "Image") return 1;
-		if (a.name.GetCount() == 8 && b.name.GetCount() == 8) {
-			int ac = a.name[7];
-			int bc = b.name[7];
-			return ac < bc;
-		}
-		return a.name > b.name;
+		return StdLess<String>()(a.name, b.name);
 	}
 };
 
