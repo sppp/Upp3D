@@ -34,6 +34,17 @@ ArrayMap<String,String>& CommonHashToName() {
 		map.Add("3871e838723dd6b166e490664eead8ec60aedd6b8d95bc8e2fe3f882f0fd90f0", "stone6");
 		map.Add("79520a3d3a0f4d3caa440802ef4362e99d54e12b1392973e4ea321840970a88a", "stone7");
 		map.Add("08b42b43ae9d3c0605da11d0eac86618ea888e62cdd9518ee8b9097488b31560", "alphabet");
+		map.Add("3c33c415862bb7964d256f4749408247da6596f2167dca2c86cc38f83c244aa6", "toymusic");
+		map.Add("29de534ed5e4a6a224d2dfffab240f2e19a9d95f5e39de8898e850efdb2a99de", "toymusic");
+		map.Add("48e2d9ef22ca6673330b8c38a260c87694d2bbc94c19fec9dfa4a1222c364a99", "toymusic");
+		map.Add("894a09f482fb9b2822c093630fc37f0ce6cfec02b652e4e341323e4b6e4a4543", "toymusic");
+		map.Add("a6a1cf7a09adfed8c362492c88c30d74fb3d2f4f7ba180ba34b98556660fada1", "toymusic");
+		map.Add("d96b229eeb7a08d53adfcf1ff89e54c9ffeebed193d317d1a01cc8125c0f5cca", "toymusic");
+		map.Add("ec8a6ea755d34600547a5353f21f0a453f9f55ff95514383b2d80b8d71283eda", "toymusic");
+		map.Add("3405e48f74815c7baa49133bdc835142948381fbe003ad2f12f5087715731153", "oldie");
+		map.Add("c3a071ecf273428bc72fc72b2dd972671de8da420a2d4f917b75d20e1c24b34c", "img_forces");
+		map.Add("35c87bcb8d7af24c54d41122dadb619dd920646a0bd0e477e7bdc6d12876df17", "van_damme");
+		map.Add("e81e818ac76a8983d746784b423178ee9f6cdcdf7f8e8d719341a6fe2d2ab303", "britney");
 	}
 	return map;
 }
@@ -43,6 +54,72 @@ void RemoveToken(String& glsl, String token) {
 	glsl.Replace((String)" " + token + " ", " ");
 	glsl.Replace((String)"\n" + token + " ", "\n");
 }
+
+
+
+
+
+
+
+void MultiStage::VideoInput::Start() {
+	Stop();
+	flag.Start();
+	Thread::Start(THISBACK(Process));
+}
+
+void MultiStage::VideoInput::Stop() {
+	flag.Stop();
+}
+
+void MultiStage::VideoInput::Process() {
+	ASSERT(cap && cap_tex[0] > 0);
+	ts.Reset();
+	if (cap && cap_tex[0] > 0) {
+		while (cap && cap->IsDeviceOpen() && flag.IsRunning()) {
+			if (!cap->Step(ts.ResetSeconds())) {
+				Sleep(1);
+				continue;
+			}
+			if (!cap->Read()) {
+				if (!cap->IsDeviceOpen())
+					cap->ReopenDevice();
+				else {
+					LOG("error: reading video input frame failed: " << cap->GetLastError());
+					Sleep(100);
+				}
+			}
+		}
+	}
+	flag.SetStopped();
+}
+
+void MultiStage::VideoInput::Clear() {
+	if (cap) {
+		cap->Close();
+		cap = 0;
+	}
+	if (cap_tex[0] > 0) {
+		glDeleteTextures(2, cap_tex);
+		cap_tex[0] = 0;
+		cap_tex[1] = 0;
+	}
+	tgt_tex.Clear();
+	path.Clear();
+}
+
+void MultiStage::VideoInput::PaintOpenGL() {
+	
+	if (cap) {
+		GLuint active_tex = cap_tex[cap_tex_i];
+		cap->PaintOpenGLTexture(active_tex);
+		for(GLuint* i : tgt_tex)
+			*i = active_tex;
+		cap_tex_i = (cap_tex_i + 1) % 2;
+	}
+}
+
+
+
 
 
 
@@ -162,8 +239,10 @@ bool MultiStage::Load(String path) {
 							SetInputType(pass_i, io_i, MultiStage::INPUT_TEXTURE);
 						else if (value == "cubemap")
 							SetInputType(pass_i, io_i, MultiStage::INPUT_CUBEMAP);
-						else if (value == "webcam")
+						else if (value == "webcam") {
 							SetInputType(pass_i, io_i, MultiStage::INPUT_WEBCAM);
+							SetInputFilename(pass_i, io_i, "<input0>");
+						}
 						else if (value == "music")
 							SetInputType(pass_i, io_i, MultiStage::INPUT_MUSIC);
 						else if (value == "musicstream")
@@ -196,7 +275,7 @@ bool MultiStage::Load(String path) {
 							}
 						}
 						if (!found) {
-							LOG("File doesn't exist: " << filename);
+							LOG("error: file doesn't exist: " << filename);
 						}
 					}
 					else if (key == "filter") {
@@ -281,6 +360,7 @@ bool MultiStage::Open(Size output_sz) {
 	if (is_open)
 		Close();
 	
+	vidmgr.Refresh();
 	frames = 0;
 	
 	LOG("MultiStage::Open: size " << output_sz.ToString());
@@ -289,44 +369,11 @@ bool MultiStage::Open(Size output_sz) {
 		return false;
 	}
 	
-	bool uses_webcam = false;
 	for (Stage& s : passes)
 		for (StageInput& i : s.in)
-			if (i.type == INPUT_WEBCAM)
-				uses_webcam = true;
-	
-	if (uses_webcam) {
-		ASSERT(!cap);
-		vidmgr.Refresh();
-		
-		for(int k = 0; k < vidmgr.GetCount() && !cap; k++) {
-			VideoDevice& dev = vidmgr[k];
-			for(int l = 0; l < dev.GetCaptureCount() && !cap; l++) {
-				VideoCaptureDevice& cap = dev.GetCapture(l);
-				int fmt, res;
-				if (cap.FindClosestFormat(def_cap_sz, def_cap_fps, 0.5, 1.5, fmt, res)) {
-					if (cap.Open(fmt, res)) {
-						this->cap = &cap;
-						glGenTextures(2, cap_tex);
-					}
-					else {
-						LOG("error: couldn't open webcam " << cap.GetPath());
-					}
-				}
-				else {
-					LOG("info: couldn't find expected format " << def_cap_sz.ToString() << ", " << def_cap_fps << "fps from webcam " << cap.GetPath());
-				}
-			}
-		}
-		
-		if (!cap) {
-			LOG("error: couldn't find webcam with expected format " << def_cap_sz.ToString() << ", " << def_cap_fps << "fps");
-			return false;
-		}
-		
-		StartWebcamThread();
-	}
-	
+			if (i.type == INPUT_WEBCAM || i.type == INPUT_VIDEO)
+				if (!OpenMedia(i.filename))
+					return false;
 	
 	for(int i = 0; i < passes.GetCount(); i++) {
 		Stage& pass = passes[i];
@@ -454,10 +501,16 @@ bool MultiStage::Open(Size output_sz) {
 					return false;
 				}
 			}
-			else if (in.type == INPUT_WEBCAM) {
-				if (cap && cap_tex[cap_tex_i] > 0) {
-					in.tex = cap_tex[cap_tex_i];
-					tgt_tex.Add(&in.tex);
+			else if (in.type == INPUT_WEBCAM || in.type == INPUT_VIDEO) {
+				VideoInput* vi = FindVideoInput(in.filename);
+				if (vi && vi->cap && vi->cap_tex[vi->cap_tex_i] > 0) {
+					in.tex = vi->cap_tex[vi->cap_tex_i];
+					vi->tgt_tex.Add(&in.tex);
+				}
+				else {
+					last_error = "video input is not open: \"" + in.filename + "\"";
+					LOG("error: " << last_error);
+					return false;
 				}
 			}
 			else if (in.type == INPUT_MUSIC) {
@@ -467,9 +520,6 @@ bool MultiStage::Open(Size output_sz) {
 				LOG("error: not implemented " << GetInputTypeString(in.type));
 			}
 			else if (in.type == INPUT_KEYBOARD) {
-				LOG("error: not implemented " << GetInputTypeString(in.type));
-			}
-			else if (in.type == INPUT_VIDEO) {
 				LOG("error: not implemented " << GetInputTypeString(in.type));
 			}
 			else if (in.type == INPUT_BUFFER) {
@@ -504,6 +554,11 @@ bool MultiStage::Open(Size output_sz) {
 	size = output_sz;
 	Ogl_UpdateTexBuffers();
 	
+	if (!CheckInputTextures())
+		return false;
+	
+	StartMediaThreads();
+	
 	total_time.Reset();
 	frame_time.Reset();
 	
@@ -512,18 +567,9 @@ bool MultiStage::Open(Size output_sz) {
 }
 
 void MultiStage::Close() {
-	StopWebcamThread();
-	tgt_tex.Clear();
+	StopMediaThreads();
+	vid_inputs.Clear();
 	
-	if (cap) {
-		cap->Close();
-		cap = 0;
-	}
-	if (cap_tex[0] > 0) {
-		glDeleteTextures(2, cap_tex);
-		cap_tex[0] = 0;
-		cap_tex[1] = 0;
-	}
 	
 	for(Stage& s : passes) {
 		s.ClearTex();
@@ -577,13 +623,8 @@ void MultiStage::MouseMove(Point pt, dword keyflags) {
 void MultiStage::Paint() {
 	Time now = GetSysTime();
 	
-	if (cap) {
-		GLuint active_tex = cap_tex[cap_tex_i];
-		cap->PaintOpenGLTexture(active_tex);
-		for(GLuint* i : tgt_tex)
-			*i = active_tex;
-		cap_tex_i = (cap_tex_i + 1) % 2;
-	}
+	for (VideoInput& vi : vid_inputs)
+		vi.PaintOpenGL();
 	
 	for(int i = 0; i < passes.GetCount(); i++) {
 		Stage& pass = passes[i];
@@ -678,6 +719,7 @@ void MultiStage::Paint() {
 		if (uindex >= 0) {
 			if (pass.in.GetCount() >= 1) {
 				int tex = GetInputTex(pass, 0);
+				ASSERT(tex != 0);
 				glActiveTexture(GL_TEXTURE0 + 0);
 				glBindTexture(GetTexType(pass, 0), tex);
 				glUniform1i(uindex, 0);
@@ -688,6 +730,7 @@ void MultiStage::Paint() {
 		if (uindex >= 0) {
 			if (pass.in.GetCount() >= 2) {
 				int tex = GetInputTex(pass, 1);
+				ASSERT(tex != 0);
 				glActiveTexture(GL_TEXTURE0 + 1);
 				glBindTexture(GetTexType(pass, 1), tex);
 				glUniform1i(uindex, 1);
@@ -698,6 +741,7 @@ void MultiStage::Paint() {
 		if (uindex >= 0) {
 			if (pass.in.GetCount() >= 3) {
 				int tex = GetInputTex(pass, 2);
+				ASSERT(tex != 0);
 				glActiveTexture(GL_TEXTURE0 + 2);
 				glBindTexture(GetTexType(pass, 2), tex);
 				glUniform1i(uindex, 2);
@@ -708,6 +752,7 @@ void MultiStage::Paint() {
 		if (uindex >= 0) {
 			if (pass.in.GetCount() >= 4) {
 				int tex = GetInputTex(pass, 3);
+				ASSERT(tex != 0);
 				glActiveTexture(GL_TEXTURE0 + 3);
 				glBindTexture(GetTexType(pass, 3), tex);
 				glUniform1i(uindex, 3);
@@ -834,30 +879,117 @@ int MultiStage::GetInputTex(Stage& cur_stage, int input_i) const {
 	else {
 		tex = in.tex;
 	}
-	ASSERT(tex != 0);
 	return tex;
 }
 
-void MultiStage::StartWebcamThread() {
-	StopWebcamThread();
-	webcam_flag.Start();
-	Thread::Start(THISBACK(ProcessWebcamThread));
+bool MultiStage::CheckInputTextures() {
+	bool fail = false;
+	for(int p = 0; p < passes.GetCount(); p++) {
+		Stage& s = passes[p];
+		for(int i = 0; i < Stage::PROG_COUNT; i++) {
+			auto& prog = s.prog[i];
+			if (prog >= 0) {
+				for(int j = 0; j < CHANNEL_COUNT; j++) {
+					GLint uindex = glGetUniformLocation(prog, "iChannel0");
+					if (uindex >= 0) {
+						if (s.in.GetCount() > j) {
+							int tex = GetInputTex(s, j);
+							if (tex == 0) {
+								LOG("error: no texture for stage " << p << ", program " << i << ", channel " << j);
+								fail = true;
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	return !fail;
 }
 
-void MultiStage::StopWebcamThread() {
-	webcam_flag.Stop();
-}
-
-void MultiStage::ProcessWebcamThread() {
+bool MultiStage::OpenMedia(String path) {
+	for (VideoInput& vi : vid_inputs)
+		if (vi.path == path)
+			return true;
 	
-	if (cap && cap_tex[0] > 0) {
-		while (cap && cap->IsOpen() && webcam_flag.IsRunning())
-			cap->Read();
+	VideoInput& vi = vid_inputs.Add();
+	vi.path = path;
+	ASSERT(!vi.cap);
+	
+	if (path.Left(6) == "<input" && path.Right(1) == ">") {
+		String numstr = path.Mid(6, path.GetCount() - 7);
+		int id = StrInt(numstr);
+		if (id >= 0 && id < vidmgr.GetNativeCount()) {
+			MediaDevice& dev = vidmgr.GetNative(id);
+			for(int l = 0; l < dev.GetCaptureCount() && !vi.cap; l++) {
+				MediaCaptureDevice& cap = dev.GetCapture(l);
+				int fmt, res;
+				if (cap.FindClosestFormat(def_cap_sz, def_cap_fps, 0.5, 1.5, fmt, res)) {
+					if (cap.OpenDevice(fmt, res)) {
+						vi.cap = &cap;
+						glGenTextures(2, vi.cap_tex);
+						return true;
+					}
+					else {
+						LOG("error: couldn't open webcam " << cap.GetPath());
+					}
+				}
+				else {
+					LOG("info: couldn't find expected format " << def_cap_sz.ToString() << ", " << def_cap_fps << "fps from webcam " << cap.GetPath());
+				}
+			}
+		}
+		else {
+			LOG("error: invalid input id: \"" << numstr << "\"");
+		}
+	}
+	else {
+		for(int k = 0; k < vidmgr.GetVirtualCount() && !vi.cap; k++) {
+			MediaDevice& dev = vidmgr.GetVirtual(k);
+			if (dev.GetPath() == path) {
+				MediaStream* open = dev.FindOpenDevice();
+				if (open) {
+					vi.cap = open;
+					return true;
+				}
+				return false;
+			}
+		}
+		
+		MediaDevice& virt = vidmgr.GetAddVirtual(path);
+		MediaFileInput& fin = virt.AddFileInput();
+		
+		if (fin.Open(path)) {
+			if (fin.OpenDevice(0, 0)) {
+				vi.cap = &fin;
+				glGenTextures(2, vi.cap_tex);
+				return true;
+			}
+			else {
+				LOG("error: couldn't open file " << path);
+			}
+		}
 	}
 	
-	webcam_flag.SetStopped();
+	return false;
 }
 
+void MultiStage::StartMediaThreads() {
+	for (VideoInput& vi : vid_inputs)
+		vi.Start();
+}
+
+void MultiStage::StopMediaThreads() {
+	for (VideoInput& vi : vid_inputs)
+		vi.Stop();
+}
+
+MultiStage::VideoInput* MultiStage::FindVideoInput(String path) {
+	for (VideoInput& vi : vid_inputs)
+		if (vi.path == path)
+			return &vi;
+	return 0;
+}
 
 
 
@@ -877,7 +1009,7 @@ void Stage::ClearTex() {
 		GLuint& depth_buf = this->depth_buf[bi];
 		GLuint& frame_buf = this->frame_buf[bi];
 		
-		if (color_buf >= 0) {
+		if (color_buf > 0) {
 			GLuint i[2] = {color_buf, depth_buf};
 			glDeleteTextures(2, i);
 			glDeleteFramebuffers(1, &frame_buf);

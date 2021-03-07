@@ -82,6 +82,27 @@ struct Stage {
 };
 
 class MultiStage {
+	struct VideoInput : Moveable<VideoInput> {
+		String path;
+		MediaStream* cap = 0;
+		GLuint cap_tex[2] = {0,0};
+		int cap_tex_i = 0;
+		RunningFlagSingle flag;
+		Vector<GLuint*> tgt_tex;
+		TimeStop ts;
+		
+		
+		typedef VideoInput CLASSNAME;
+		VideoInput() {}
+		~VideoInput() {Stop(); Clear();}
+		
+		void Clear();
+		void Start();
+		void Stop();
+		void Process();
+		void PaintOpenGL();
+	};
+	
 	TimeStop frame_time, total_time;
 	double geometry[4] = {0,0,0,0};
 	double mouse[4] = {0,0,0,0};
@@ -97,15 +118,13 @@ class MultiStage {
 	int last_time = 0;
 	bool is_open = false;
 	
-	VideoDeviceManager vidmgr;
-	VideoCaptureDevice* cap = 0;
-	GLuint cap_tex[2] = {0,0};
-	int cap_tex_i = 0;
+	// Video device input
+	Array<VideoInput> vid_inputs;
+	MediaDeviceManager vidmgr;
 	Size def_cap_sz;
 	int def_cap_fps;
-	bool uses_webcam;
-	RunningFlagSingle webcam_flag;
-	Vector<GLuint*> tgt_tex;
+	
+	// Video file input
 	
 	
 	int   Ogl_LoadTexture(String filename, GLenum type, GLenum *tex_id, char filter, char repeat, bool flip);
@@ -120,13 +139,16 @@ class MultiStage {
 	int   GetInputTex(Stage& cur_stage, int input_i) const;
 	int   GetTexType(Stage& cur_stage, int input_i) const;
 	int   GetChCode(int channels);
+	void  StartMediaThreads();
+	void  StopMediaThreads();
 	
-	void StartWebcamThread();
-	void StopWebcamThread();
-	void ProcessWebcamThread();
+	bool CheckInputTextures();
+	
+	bool OpenMedia(String path);
 	
 protected:
 	
+	static const int CHANNEL_COUNT = 4;
 	
 	
 	void SetInputCount(int pass, int count);
@@ -142,6 +164,7 @@ protected:
 	
 	int GetPassCount() const;
 	Stage& GetStageById(int id) const;
+	VideoInput* FindVideoInput(String path);
 	
 	enum {
 		INPUT_INVALID = -1,

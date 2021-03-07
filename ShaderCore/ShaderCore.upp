@@ -5,6 +5,7 @@ uses
 	ComputerVision;
 
 file
+	TODO.txt,
 	main.cpp,
 	PrintGLSL.cpp,
 	ShaderCore.h,
