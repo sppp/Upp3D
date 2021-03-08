@@ -29,7 +29,7 @@ void MultiStage::Ogl_UpdateTexBuffers() {
 				// color buffer
 				glGenTextures(1, &color_buf);
 				glBindTexture(GL_TEXTURE_2D, color_buf);
-				glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, size.cx, size.cy, 0, GL_RGBA, GL_UNSIGNED_BYTE, 0);
+				glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, stream.size.cx, stream.size.cy, 0, GL_RGBA, GL_UNSIGNED_BYTE, 0);
 				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -39,7 +39,7 @@ void MultiStage::Ogl_UpdateTexBuffers() {
 				// depth buffer
 				glGenRenderbuffersEXT(1, &depth_buf);
 				glBindRenderbufferEXT(GL_RENDERBUFFER_EXT, depth_buf);
-				glRenderbufferStorageEXT(GL_RENDERBUFFER_EXT, GL_DEPTH_COMPONENT, size.cx, size.cy);
+				glRenderbufferStorageEXT(GL_RENDERBUFFER_EXT, GL_DEPTH_COMPONENT, stream.size.cx, stream.size.cy);
 				glBindRenderbufferEXT(GL_RENDERBUFFER_EXT, 0);
 				
 				// FBO
@@ -58,22 +58,64 @@ void MultiStage::Ogl_UpdateTexBuffers() {
 		}
 	}
 	
+	// Keyboard buffer
+	int key_buf_size = key_tex_w * key_tex_h;
+	DataBuffer& key_buf = data_bufs.GetAdd(DATA_IN_KEYBOARD);
+	key_buf.data.SetCount(key_buf_size, 0);
+	glGenTextures(1, &key_buf.tex);
+	glBindTexture(GL_TEXTURE_2D, key_buf.tex);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, key_tex_w, key_tex_h, 0, GL_RED, GL_UNSIGNED_BYTE, 0);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glBindTexture(GL_TEXTURE_2D, 0);
+	
+	
 }
 
 
 
+int MultiStage::Ogl_NewTexture(Size res, GLuint* tex_, int tex_n, GLenum type, char filter, char repeat) {
+	glGenTextures(tex_n, tex_);
+	
+	for(int i = 0; i < tex_n; i++) {
+		GLuint& tex = tex_[i];
+		
+		glBindTexture(type, tex);
+		
+		glTexImage2D(type, 0, GL_RGBA32F,
+					 res.cx, res.cy,
+					 0, GetChCode(4),
+					 GL_FLOAT,
+					 0);
+		
+		Ogl_TexFlags(type, filter, repeat);
+		
+		GLenum err = glGetError();
+		if (err != GL_NO_ERROR) {
+			last_error = "gl error " + HexStr(err);
+			glBindTexture(type, 0);
+			return 0;
+		}
+	}
+	
+	glBindTexture(type, 0);
+	
+	return 1;
+}
 
 int MultiStage::Ogl_LoadTexture(String filename, GLenum type, GLenum *tex_id, char filter, char repeat, bool flip) {
 	Image img = StreamRaster::LoadFileAny(filename);
 	if (!img) {
-		LOG("error: couldn't load file " << filename);
+		last_error = "couldn't load file " + filename;
 		return 0;
 	}
 	
 	int width = img.GetWidth();
 	int height = img.GetHeight();
 	if (!width || !height) {
-		LOG("error: empty image " << filename);
+		last_error = "empty image " + filename;
 		return 0;
 	}
 	
@@ -141,7 +183,7 @@ int MultiStage::Ogl_LoadTexture(String filename, GLenum type, GLenum *tex_id, ch
 	
 	GLenum err = glGetError();
 	if (err != GL_NO_ERROR) {
-		LOG("error: " << HexStr(err));
+		last_error = "gl error " + HexStr(err);
 		glBindTexture(type, 0);
 		return 0;
 	}
@@ -155,7 +197,7 @@ int MultiStage::Ogl_LoadVolume(String filename, GLenum *tex_id, char filter, cha
 	
 	String s = LoadFile(filename);
 	if (s.IsEmpty()) {
-		LOG("error: couldn't load file " << filename);
+		last_error = "couldn't load file " + filename;
 		return 0;
 	}
 	Vector<byte> values;
@@ -184,7 +226,7 @@ int MultiStage::Ogl_LoadVolume(String filename, GLenum *tex_id, char filter, cha
 			}
 		}
 		if (channels <= 0 || len <= 0) {
-			LOG("error: couldn't get volume data dimensions");
+			last_error = "couldn't get volume data dimensions";
 			return 0;
 		}
 		w = h = d = len;
@@ -205,7 +247,7 @@ int MultiStage::Ogl_LoadVolume(String filename, GLenum *tex_id, char filter, cha
 	
 	err = glGetError();
 	if (err != GL_NO_ERROR) {
-		LOG("error: " << HexStr(err));
+		last_error = "gl error " + HexStr(err);
 		glBindTexture(GL_TEXTURE_3D, 0);
 		return 0;
 	}
@@ -227,7 +269,7 @@ int MultiStage::Ogl_LoadVolume(String filename, GLenum *tex_id, char filter, cha
 	
 	err = glGetError();
 	if (err != GL_NO_ERROR) {
-		LOG("error: " << HexStr(err));
+		last_error = "gl error " + HexStr(err);
 		glBindTexture(GL_TEXTURE_3D, 0);
 		return 0;
 	}
@@ -236,7 +278,7 @@ int MultiStage::Ogl_LoadVolume(String filename, GLenum *tex_id, char filter, cha
 	
 	err = glGetError();
 	if (err != GL_NO_ERROR) {
-		LOG("error: " << HexStr(err));
+		last_error = "gl error " + HexStr(err);
 		glBindTexture(GL_TEXTURE_3D, 0);
 		return 0;
 	}
@@ -266,7 +308,7 @@ int MultiStage::Ogl_LoadCubemap(String filename, GLenum *tex_id, char filter, ch
 		
 		Image img = StreamRaster::LoadFileAny(path);
 		if (!img) {
-			LOG("error: couldn't load file " << path);
+			last_error = "couldn't load file " + path;
 			glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
 			return 0;
 		}
@@ -274,7 +316,7 @@ int MultiStage::Ogl_LoadCubemap(String filename, GLenum *tex_id, char filter, ch
 		int width = img.GetWidth();
 		int height = img.GetHeight();
 		if (!width || !height) {
-			LOG("error: empty image " << path);
+			last_error = "empty image " + path;
 			glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
 			return 0;
 		}
@@ -400,6 +442,11 @@ bool MultiStage::Ogl_LinkProgram(Stage& s) {
 	GLint status = GL_FALSE;
 	GLint loglen, n_uniforms;
 	
+	if (program < 0) {
+		last_error = "internal error: opengl program was expected to be valid";
+		return false;
+	}
+	
 	glLinkProgram(program);
 	
 	glGetProgramiv(program, GL_LINK_STATUS, &status);
@@ -408,7 +455,10 @@ bool MultiStage::Ogl_LinkProgram(Stage& s) {
 		Vector<GLchar> msg;
 		msg.SetCount(loglen);
 		glGetProgramInfoLog(program, loglen, NULL, msg.Begin());
-		last_error = msg.Begin();
+		if (loglen)
+			last_error.Set(msg.Begin(), loglen);
+		else
+			last_error = "linking failed with unknown error";
 		return false;
 	}
 	

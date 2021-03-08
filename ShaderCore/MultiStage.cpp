@@ -73,10 +73,10 @@ void MultiStage::VideoInput::Stop() {
 
 void MultiStage::VideoInput::Process() {
 	ASSERT(cap && cap_tex[0] > 0);
-	ts.Reset();
+	step_time.Reset();
 	if (cap && cap_tex[0] > 0) {
 		while (cap && cap->IsDeviceOpen() && flag.IsRunning()) {
-			if (!cap->Step(ts.ResetSeconds())) {
+			if (!cap->Step(step_time.ResetSeconds())) {
 				Sleep(1);
 				continue;
 			}
@@ -84,7 +84,8 @@ void MultiStage::VideoInput::Process() {
 				if (!cap->IsDeviceOpen())
 					cap->ReopenDevice();
 				else {
-					LOG("error: reading video input frame failed: " << cap->GetLastError());
+					if (ms)
+						ms->last_error = "reading video input frame failed: " + cap->GetLastError();
 					Sleep(100);
 				}
 			}
@@ -108,7 +109,6 @@ void MultiStage::VideoInput::Clear() {
 }
 
 void MultiStage::VideoInput::PaintOpenGL() {
-	
 	if (cap) {
 		GLuint active_tex = cap_tex[cap_tex_i];
 		cap->PaintOpenGLTexture(active_tex);
@@ -118,11 +118,41 @@ void MultiStage::VideoInput::PaintOpenGL() {
 	}
 }
 
+void MultiStage::DataBuffer::Clear() {
+	data.Clear();
+	if (tex) {
+		glDeleteTextures(1, &tex);
+		tex = 0;
+	}
+	changed = false;
+}
+
+void MultiStage::DataBuffer::PaintOpenGL() {
+	if (changed && data.GetCount()) {
+		glBindTexture(GL_TEXTURE_2D, tex);
+		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, key_tex_w, key_tex_h, GL_RED, GL_UNSIGNED_BYTE, data.Begin());
+		glBindTexture(GL_TEXTURE_2D, 0);
+		changed = false;
+	}
+	
+	for (GLuint* tex : tgt_tex)
+		*tex = this->tex;
+}
 
 
 
 
 
+
+
+void MultiStage::SetSize(Size sz) {
+	geometry[0] = sz.cx;
+	geometry[1] = sz.cy;
+	if (is_open && stream.size != sz) {
+		stream.size = sz;
+		UpdateTexBuffers();
+	}
+}
 
 void MultiStage::DumpStages() {
 	LOG("Name: " << name);
@@ -170,6 +200,7 @@ bool MultiStage::Load(String path) {
 	dirs.Add( ShareDirFile("videos") );
 	//DUMPC(dirs);
 	
+	data_bufs.Clear();
 	passes.Clear();
 	RealizeCount(0, -1);
 	
@@ -220,7 +251,7 @@ bool MultiStage::Load(String path) {
 					}
 				}
 				else {
-					LOG("Invalid key: " << key);
+					last_error = "Invalid key: " + key;
 					return false;
 				}
 			}
@@ -256,7 +287,7 @@ bool MultiStage::Load(String path) {
 						else if (value == "buffer")
 							SetInputType(pass_i, io_i, MultiStage::INPUT_BUFFER);
 						else {
-							LOG("Invalid key + value: " << key << " = " << value);
+							last_error = "invalid key + value: " + key + " = " + value;
 							return false;
 						}
 					}
@@ -275,7 +306,7 @@ bool MultiStage::Load(String path) {
 							}
 						}
 						if (!found) {
-							LOG("error: file doesn't exist: " << filename);
+							last_error = "file doesn't exist: " + filename;
 						}
 					}
 					else if (key == "filter") {
@@ -299,7 +330,7 @@ bool MultiStage::Load(String path) {
 							SetInputValue(pass_i, io_i, -1, -1, false);
 					}
 					else {
-						LOG("Invalid key: " << key);
+						last_error = "invalid key: " + key;
 						return false;
 					}
 				}
@@ -309,17 +340,17 @@ bool MultiStage::Load(String path) {
 						SetOutputId(pass_i, StrInt(value));
 					}
 					else {
-						LOG("Invalid key: " << key);
+						last_error = "invalid key: " + key;
 						return false;
 					}
 				}
 				else {
-					LOG("Invalid key: " << key);
+					last_error = "invalid key: " + key;
 					return false;
 				}
 			}
 			else {
-				LOG("Invalid key: " << key);
+				last_error = "invalid key: " + key;
 				return false;
 			}
 		}
@@ -330,7 +361,7 @@ bool MultiStage::Load(String path) {
 		String glsl = LoadFile(glsl_path);
 		
 		if (glsl.IsEmpty()) {
-			LOG("Couldn't load shader stage: " << glsl_path);
+			last_error = "couldn't load shader stage: " + glsl_path;
 			return false;
 		}
 		
@@ -435,7 +466,7 @@ bool MultiStage::Open(Size output_sz) {
 		for(int j = 0; j < passes.GetCount(); j++) {
 			Stage& pass0 = passes[j];
 			if (pass0.is_common)
-				code += pass0.fg_glsl;
+				code += pass0.fg_glsl + "\n";
 		}
 		
 		code += pass.fg_glsl;
@@ -448,11 +479,13 @@ bool MultiStage::Open(Size output_sz) {
 		
 		// Hotfixes
 		code.Replace("precision float;", "");
+		if (code.Find("vec4 char(") >= 0)
+			code.Replace("char(", "_char(");
 		
 		//LOG(code);
 		
 		if (!Ogl_CompileProgram(pass, code)) {
-			LOG(code);
+			LOG(GetLineNumStr(code));
 			Close();
 			return false;
 		}
@@ -463,6 +496,9 @@ bool MultiStage::Open(Size output_sz) {
 	
 	for(int i = 0; i < passes.GetCount(); i++) {
 		Stage& pass = passes[i];
+		if (pass.is_common)
+			continue;
+		
 		LOG("\tLinking stage " << i << ": " << pass.name);
 		
 		if (!Ogl_LinkProgram(pass)) {
@@ -505,22 +541,24 @@ bool MultiStage::Open(Size output_sz) {
 				VideoInput* vi = FindVideoInput(in.filename);
 				if (vi && vi->cap && vi->cap_tex[vi->cap_tex_i] > 0) {
 					in.tex = vi->cap_tex[vi->cap_tex_i];
+					in.stream = vi->cap;
 					vi->tgt_tex.Add(&in.tex);
 				}
 				else {
 					last_error = "video input is not open: \"" + in.filename + "\"";
-					LOG("error: " << last_error);
 					return false;
 				}
 			}
 			else if (in.type == INPUT_MUSIC) {
-				LOG("error: not implemented " << GetInputTypeString(in.type));
+				last_error = "not implemented " + GetInputTypeString(in.type);
 			}
 			else if (in.type == INPUT_MUSICSTREAM) {
-				LOG("error: not implemented " << GetInputTypeString(in.type));
+				last_error = "not implemented " + GetInputTypeString(in.type);
 			}
 			else if (in.type == INPUT_KEYBOARD) {
-				LOG("error: not implemented " << GetInputTypeString(in.type));
+				DataBuffer& buf = data_bufs.GetAdd(DATA_IN_KEYBOARD);
+				in.stream = &stream;
+				buf.tgt_tex.Add(&in.tex);
 			}
 			else if (in.type == INPUT_BUFFER) {
 				Stage& s = GetStageById(in.id);
@@ -551,7 +589,7 @@ bool MultiStage::Open(Size output_sz) {
 		}
 	}
 	
-	size = output_sz;
+	stream.size = output_sz;
 	Ogl_UpdateTexBuffers();
 	
 	if (!CheckInputTextures())
@@ -569,7 +607,9 @@ bool MultiStage::Open(Size output_sz) {
 void MultiStage::Close() {
 	StopMediaThreads();
 	vid_inputs.Clear();
-	
+	data_bufs.Clear();
+	stream.Clear();
+	is_left_down = false;
 	
 	for(Stage& s : passes) {
 		s.ClearTex();
@@ -595,36 +635,90 @@ void MultiStage::Close() {
 }
 
 void MultiStage::LeftDown(Point pt, dword keyflags) {
+	is_left_down = true;
 	if (geometry[0] > 0.1 && geometry[1] > 0.1) {
-		mouse[2] = mouse[0] =               geometry[2] + pt.x;
-		mouse[3] = mouse[1] = geometry[1] - geometry[3] - pt.y;
+		mouse[0] =               geometry[2] + pt.x;
+		mouse[1] = geometry[1] - geometry[3] - pt.y;
+		mouse[2] = +mouse[0];
+		mouse[3] = -mouse[1];
 	} else {
-		mouse[2] = mouse[0] = 0;
-		mouse[3] = mouse[1] = size.cy;
+		mouse[0] = 0;
+		mouse[1] = stream.size.cy;
+		mouse[2] = 0;
+		mouse[3] = -mouse[1];
 	}
 }
 
 void MultiStage::LeftUp(Point pt, dword keyflags) {
-	mouse[2] = -1;
-	mouse[3] = -1;
+	is_left_down = false;
+	//mouse[2] = -mouse[0];
+	//mouse[3] = -mouse[1];
+	mouse[2] = -mouse[2]; // observed behaviour
 }
 
 void MultiStage::MouseMove(Point pt, dword keyflags) {
-	if (geometry[0] > 0.1 && geometry[1] > 0.1) {
-		mouse[0] =               geometry[2] + pt.x;
-		mouse[1] = geometry[1] - geometry[3] - pt.y;
+	if (is_left_down) {
+		if (geometry[0] > 0.1 && geometry[1] > 0.1) {
+			mouse[0] =               geometry[2] + pt.x;
+			mouse[1] = geometry[1] - geometry[3] - pt.y;
+		}
+		else {
+			mouse[0] = 0;
+			mouse[1] = stream.size.cy;
+		}
 	}
-	else {
-		mouse[0] = 0;
-		mouse[1] = size.cy;
+}
+
+bool MultiStage::Key(dword key, int count) {
+	DataBuffer& key_buf = data_bufs.GetAdd(DATA_IN_KEYBOARD);
+	
+	if (key_buf.data.GetCount()) {
+		bool is_key_down = true;
+		bool is_lalt = false;
+		bool is_lshift = false;
+		bool is_lctrl = false;
+		if (key & K_KEYUP) {
+			key &= ~K_KEYUP;
+			is_key_down = false;
+		}
+		if (key & K_ALT) {
+			key &= ~K_ALT;
+			is_lalt = true;
+		}
+		if (key & K_SHIFT) {
+			key &= ~K_SHIFT;
+			is_lshift = true;
+		}
+		if (key & K_CTRL) {
+			key &= ~K_CTRL;
+			is_lctrl = true;
+		}
+		
+		key = ToUpper(key);
+		
+		if (key >= 0 && key < key_tex_w) {
+			if (key > 0)
+				key_buf.data[key] = is_key_down;
+			key_buf.data[16] = is_lshift;
+			key_buf.data[17] = is_lctrl;
+			key_buf.data[18] = is_lalt;
+			key_buf.changed = true;
+		}
 	}
+	
+	return true;
 }
 
 void MultiStage::Paint() {
 	Time now = GetSysTime();
 	
+	stream.total_seconds = total_time.Seconds();
+	stream.frame_seconds = frame_time.Seconds();
+	
 	for (VideoInput& vi : vid_inputs)
 		vi.PaintOpenGL();
+	for (DataBuffer& db : data_bufs.GetValues())
+		db.PaintOpenGL();
 	
 	for(int i = 0; i < passes.GetCount(); i++) {
 		Stage& pass = passes[i];
@@ -661,8 +755,7 @@ void MultiStage::Paint() {
 		glUseProgram(prog);
 		
 		if (frames % 100 == 0) {
-			double elapsed = frame_time.Seconds();
-			fprintf(stderr, "FPS: %.2f\n", 1.0 / elapsed);
+			fprintf(stderr, "FPS: %.2f\n", 1.0 / stream.frame_seconds);
 		}
 		
 		uindex = glGetUniformLocation(prog, "iResolution");
@@ -670,19 +763,17 @@ void MultiStage::Paint() {
 			if (geometry[0] > 0.1 && geometry[1] > 0.1)
 				glUniform3f(uindex, geometry[0], geometry[1], 1.0);
 			else
-				glUniform3f(uindex, size.cx, size.cy, 1.0);
+				glUniform3f(uindex, stream.size.cx, stream.size.cy, 1.0);
 		}
 		
 		uindex = glGetUniformLocation(prog, "iTime");
 		if (uindex >= 0) {
-			float t = total_time.Seconds();
-			glUniform1f(uindex, t);
+			glUniform1f(uindex, stream.total_seconds);
 		}
 		
 		uindex = glGetUniformLocation(prog, "iTimeDelta");
 		if (uindex >= 0) {
-			float t = frame_time.Seconds();
-			glUniform1f(uindex, t);
+			glUniform1f(uindex, stream.frame_seconds);
 		}
 		
 		uindex = glGetUniformLocation(prog, "iFrame");
@@ -709,7 +800,7 @@ void MultiStage::Paint() {
 			if (geometry[0] > 0.1 && geometry[1] > 0.1) {
 				glUniform2f(uindex,
 							geometry[2],
-							geometry[1] - size.cy - geometry[3]);
+							geometry[1] - stream.size.cy - geometry[3]);
 			} else {
 				glUniform2f(uindex, 0.0, 0.0);
 			}
@@ -766,12 +857,43 @@ void MultiStage::Paint() {
 		
 		uindex = glGetUniformLocation(prog, "iChannelTime");
 		if (uindex >= 0) {
-			TODO
+			double values[4];
+			for(int j = 0; j < 4; j++) {
+				if (j < pass.in.GetCount()) {
+					StageInput& in = pass.in[j];
+					if (in.stream)
+						values[j] = in.stream->GetSeconds();
+					else
+						values[j] = stream.total_seconds;
+				}
+				else
+					values[j] = stream.total_seconds;
+			}
+			glUniform4f(uindex, values[0], values[1], values[2], values[3]);
 		}
 		
 		uindex = glGetUniformLocation(prog, "iChannelResolution");
 		if (uindex >= 0) {
-			TODO
+			GLfloat values[4*3];
+			for(int j = 0; j < 4; j++) {
+				bool is_valid = false;
+				if (j < pass.in.GetCount()) {
+					StageInput& in = pass.in[j];
+					if (in.stream) {
+						is_valid = true;
+						Size sz = in.stream->GetResolution();
+						values[j*3+0] = sz.cx;
+						values[j*3+1] = sz.cy;
+						values[j*3+2] = 0;
+					}
+				}
+				if (!is_valid) {
+					values[j*3+0] = 0;
+					values[j*3+1] = 0;
+					values[j*3+2] = 0;
+				}
+			}
+			glUniformMatrix3fv(uindex, 4, false, values);
 		}
 		
 		
@@ -876,11 +998,21 @@ int MultiStage::GetInputTex(Stage& cur_stage, int input_i) const {
 		ASSERT(in_stage.color_buf[buf_i] > 0);
 		tex = in_stage.color_buf[buf_i];
 	}
+	else if (in.type == INPUT_KEYBOARD) {
+		int i = data_bufs.Find(DATA_IN_KEYBOARD);
+		ASSERT(i >= 0);
+		if (i >= 0) {
+			const DataBuffer& key_buf = data_bufs[i];
+			ASSERT(key_buf.tex > 0);
+			tex = key_buf.tex;
+		}
+	}
 	else {
 		tex = in.tex;
 	}
 	return tex;
 }
+
 
 bool MultiStage::CheckInputTextures() {
 	bool fail = false;
@@ -895,7 +1027,10 @@ bool MultiStage::CheckInputTextures() {
 						if (s.in.GetCount() > j) {
 							int tex = GetInputTex(s, j);
 							if (tex == 0) {
-								LOG("error: no texture for stage " << p << ", program " << i << ", channel " << j);
+								last_error =
+									"no texture for stage " + IntStr(p) +
+									", program " + IntStr(i) +
+									", channel " + IntStr(j);
 								fail = true;
 							}
 						}
@@ -913,6 +1048,7 @@ bool MultiStage::OpenMedia(String path) {
 			return true;
 	
 	VideoInput& vi = vid_inputs.Add();
+	vi.ms = this;
 	vi.path = path;
 	ASSERT(!vi.cap);
 	
@@ -927,20 +1063,23 @@ bool MultiStage::OpenMedia(String path) {
 				if (cap.FindClosestFormat(def_cap_sz, def_cap_fps, 0.5, 1.5, fmt, res)) {
 					if (cap.OpenDevice(fmt, res)) {
 						vi.cap = &cap;
-						glGenTextures(2, vi.cap_tex);
-						return true;
+						Size sz = cap.GetResolution();
+						return Ogl_NewTexture(sz, vi.cap_tex, 2, GL_TEXTURE_2D, StageInput::FILTER_MIPMAP, StageInput::REPEAT_CLAMP);
 					}
 					else {
-						LOG("error: couldn't open webcam " << cap.GetPath());
+						last_error = "couldn't open webcam " + cap.GetPath();
 					}
 				}
 				else {
-					LOG("info: couldn't find expected format " << def_cap_sz.ToString() << ", " << def_cap_fps << "fps from webcam " << cap.GetPath());
+					last_error =
+						"couldn't find expected format " + def_cap_sz.ToString() +
+						", " + IntStr(def_cap_fps) +
+						"fps from webcam "+ cap.GetPath();
 				}
 			}
 		}
 		else {
-			LOG("error: invalid input id: \"" << numstr << "\"");
+			last_error = "invalid input id: \"" + numstr + "\"";
 		}
 	}
 	else {
@@ -962,11 +1101,11 @@ bool MultiStage::OpenMedia(String path) {
 		if (fin.Open(path)) {
 			if (fin.OpenDevice(0, 0)) {
 				vi.cap = &fin;
-				glGenTextures(2, vi.cap_tex);
-				return true;
+				Size sz = fin.GetResolution();
+				return Ogl_NewTexture(sz, vi.cap_tex, 2, GL_TEXTURE_2D, StageInput::FILTER_MIPMAP, StageInput::REPEAT_CLAMP);
 			}
 			else {
-				LOG("error: couldn't open file " << path);
+				last_error = "couldn't open file " + path;
 			}
 		}
 	}
@@ -991,6 +1130,43 @@ MultiStage::VideoInput* MultiStage::FindVideoInput(String path) {
 	return 0;
 }
 
+void MultiStage::Event(const CtrlEvent& e) {
+	
+	if (e.type == EVENT_MOUSEMOVE) {
+		MouseMove(e.pt, e.value);
+	}
+	else if (e.type == EVENT_KEYDOWN || e.type == EVENT_KEYUP) {
+		Key(e.value, e.n);
+	}
+	else if (e.type == EVENT_MOUSE_EVENT) {
+		switch (e.n) {
+			case Ctrl::LEFT_DOWN:		LeftDown(e.pt, e.value);break;
+			case Ctrl::MIDDLE_DOWN:		break;
+			case Ctrl::RIGHT_DOWN:		break;
+			
+			case Ctrl::LEFT_DOUBLE:		break;
+			case Ctrl::MIDDLE_DOUBLE:	break;
+			case Ctrl::RIGHT_DOUBLE:	break;
+			
+			case Ctrl::LEFT_TRIPLE:		break;
+			case Ctrl::MIDDLE_TRIPLE:	break;
+			case Ctrl::RIGHT_TRIPLE:	break;
+			
+			case Ctrl::LEFT_UP:			LeftUp(e.pt, e.value); break;
+			case Ctrl::MIDDLE_UP:		break;
+			case Ctrl::RIGHT_UP:		break;
+		}
+	}
+	else if (e.type == EVENT_WINDOW_RESIZE) {
+		if (e.sz.cx >= 100 && e.sz.cy >= 100)
+			SetSize(e.sz);
+	}
+	else {
+		last_error = "event not supported: " + GetEventTypeString(e.type);
+		LOG("error: " << last_error);
+	}
+	
+}
 
 
 

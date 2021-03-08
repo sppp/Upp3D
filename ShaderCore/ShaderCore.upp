@@ -2,7 +2,8 @@ description "\377B255,0,255";
 
 uses
 	Sppp,
-	ComputerVision;
+	ComputerVision,
+	SpppCtrl;
 
 file
 	TODO.txt,

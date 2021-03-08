@@ -10,6 +10,7 @@ struct StageInput {
 	bool vflip = 0;
 	String filename;
 	GLenum tex = 0;
+	const VolatileStream* stream = 0;
 	
 	enum {
 		FILTER_NEAREST,
@@ -82,14 +83,26 @@ struct Stage {
 };
 
 class MultiStage {
+	struct PipelineStream : public VolatileStream {
+		double total_seconds = 0;
+		double frame_seconds = 0;
+		Size size;
+		
+		PipelineStream() : size(0,0) {}
+		void Clear() {total_seconds = 0; frame_seconds = 0;}
+		double GetSeconds() const override {return total_seconds;}
+		Size GetResolution() const override {return size;}
+	};
+	
 	struct VideoInput : Moveable<VideoInput> {
+		MultiStage* ms = 0;
 		String path;
 		MediaStream* cap = 0;
 		GLuint cap_tex[2] = {0,0};
 		int cap_tex_i = 0;
 		RunningFlagSingle flag;
 		Vector<GLuint*> tgt_tex;
-		TimeStop ts;
+		TimeStop step_time;
 		
 		
 		typedef VideoInput CLASSNAME;
@@ -102,13 +115,29 @@ class MultiStage {
 		void Process();
 		void PaintOpenGL();
 	};
+	struct DataBuffer : Moveable<DataBuffer> {
+		GLuint tex = 0;
+		Vector<GLuint*> tgt_tex;
+		Vector<byte> data;
+		bool changed = false;
+		
+		~DataBuffer() {Clear();}
+		void Clear();
+		void PaintOpenGL();
+	};
+	enum {
+		DATA_IN_KEYBOARD,
+		DATA_IN_MIDI,
+	};
+	
+	PipelineStream stream;
 	
 	TimeStop frame_time, total_time;
 	double geometry[4] = {0,0,0,0};
 	double mouse[4] = {0,0,0,0};
 	int frames = 0;
-	Size size;
 	int fps_limit = 60;
+	bool is_left_down = false;
 	
 	Vector<uint32> gl_stages;
 	Array<Stage> passes;
@@ -126,7 +155,13 @@ class MultiStage {
 	
 	// Video file input
 	
+	// Keyboard input
+	static const int key_tex_w = 256;
+	static const int key_tex_h = 256;
+	ArrayMap<int, DataBuffer> data_bufs;
 	
+	
+	int   Ogl_NewTexture(Size res, GLuint* tex, int tex_n, GLenum type, char filter, char repeat);
 	int   Ogl_LoadTexture(String filename, GLenum type, GLenum *tex_id, char filter, char repeat, bool flip);
 	int   Ogl_LoadVolume(String filename, GLenum *tex_id, char filter, char repeat, bool flip);
 	int   Ogl_LoadCubemap(String filename, GLenum *tex_id, char filter, char repeat, bool flip);
@@ -197,7 +232,7 @@ protected:
 public:
 	typedef MultiStage CLASSNAME;
 	
-	MultiStage() : size(0,0), def_cap_sz(1280,720), def_cap_fps(30) {}
+	MultiStage() : def_cap_sz(1280,720), def_cap_fps(30) {}
 	~MultiStage() {Close();}
 	
 	bool Open(Size output_sz);
@@ -206,16 +241,17 @@ public:
 	void DumpStages();
 	
 	void Paint();
+	void Event(const CtrlEvent& e);
 	void LeftDown(Point p, dword keyflags);
 	void LeftUp(Point p, dword keyflags);
 	void MouseMove(Point p, dword keyflags);
-	void KeyboardHandler(unsigned char key, int x, int y);
+	bool Key(dword key, int count);
 	
-	void SetSize(Size sz) {if (is_open && size != sz) {size = sz; UpdateTexBuffers();}}
+	void SetSize(Size sz);
 	void SetFPS(int fps) {fps_limit = fps;}
 	
 	String GetLastError() const {return last_error;}
-	Size GetSize() const {return size;}
+	Size GetSize() const {return stream.size;}
 	bool IsOpen() const {return is_open;}
 	
 };

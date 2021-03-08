@@ -15,6 +15,10 @@ void ShaderViewer::Initialize() {
 	
 }
 
+void ShaderViewer::Uninitialize() {
+	
+}
+
 void ShaderViewer::Render(SystemDraw& draw) {
 	//Size sz = draw.GetPageSize();
 	//draw.DrawRect(sz, RandomColor(64, 64));
@@ -24,7 +28,7 @@ void ShaderViewer::Render(SystemDraw& draw) {
 	Size sz = draw.GetPageSize();
 	if (!ms.IsOpen()) {
 		if (!ms.Open(sz)) {
-			LOG("error: " << ms.GetLastError());
+			LOG("error: multistage open failed: \"" << ms.GetLastError() << "\"");
 			fail = true;
 			return;
 		}
@@ -33,6 +37,10 @@ void ShaderViewer::Render(SystemDraw& draw) {
 		ms.SetSize(sz);
 	
 	ms.Paint();
+}
+
+void ShaderViewer::RecvCtrlEvent(const CtrlEvent& e) {
+	ms.Event(e);
 }
 
 
