@@ -9,7 +9,8 @@ NAMESPACE_SPPP_BEGIN
 
 class ShaderViewer :
 	public Component<ShaderViewer>,
-	public ScreenSink,
+	public ScreenSource,
+	public AudioSource,
 	public ControllerSink
 {
 	NS_SHADER::MultiStage ms;
@@ -17,7 +18,8 @@ class ShaderViewer :
 	
 	
 public:
-	IFACE_CB(ScreenSink);
+	IFACE_CB(ScreenSource);
+	IFACE_CB(AudioSource);
 	IFACE_CB(ControllerSink);
 	
 	ShaderViewer() {}
@@ -25,9 +27,11 @@ public:
 	void Uninitialize() override;
 	void operator=(const ShaderViewer& t) {Panic("Can't copy ShaderViewer");}
 	
-	void Render(SystemDraw& draw) override;
-	void SetFPS(int fps) override {ms.SetFPS(fps);}
+	void Render(const ScreenSinkConfig& config, SystemDraw& draw) override;
+	void Play(const AudioSinkConfig& config, SystemSound& snd) override;
 	
+	void EmitAudioSource(float dt) override;
+	void EmitScreenSource(float dt) override;
 	void RecvCtrlEvent(const CtrlEvent& e) override;
 	
 };

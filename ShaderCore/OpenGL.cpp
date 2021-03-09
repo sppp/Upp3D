@@ -3,58 +3,79 @@
 NAMESPACE_SHADER_BEGIN
 
 
+void MultiStage::Ogl_CreateTex(Stage& s, Size sz, int channels) {
+	bool create_depth = true;
+	bool create_fbo = true;
+	int buf_count = 1;
+	if (s.is_doublebuf)
+		buf_count++;
+	
+	EnableOpenGLDebugMessages(1);
+	
+	for(int bi = 0; bi < buf_count; bi++) {
+		GLuint& color_buf = s.color_buf[bi];
+		GLuint& depth_buf = s.depth_buf[bi];
+		GLuint& frame_buf = s.frame_buf[bi];
+		ASSERT(color_buf == 0);
+		
+		// color buffer
+		glGenTextures(1, &color_buf);
+		glBindTexture(GL_TEXTURE_2D, color_buf);
+		glTexImage2D(GL_TEXTURE_2D, 0, GetChCode(channels, true), sz.cx, sz.cy, 0, GetChCode(channels), GL_UNSIGNED_BYTE, 0);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glBindTexture(GL_TEXTURE_2D, 0);
+		
+		// depth buffer
+		if (create_depth) {
+			glGenRenderbuffersEXT(1, &depth_buf);
+			glBindRenderbufferEXT(GL_RENDERBUFFER_EXT, depth_buf);
+			glRenderbufferStorageEXT(GL_RENDERBUFFER_EXT, GL_DEPTH_COMPONENT, sz.cx, sz.cy);
+			glBindRenderbufferEXT(GL_RENDERBUFFER_EXT, 0);
+		}
+		
+		// FBO
+		if (create_fbo) {
+			glGenFramebuffersEXT(1, &frame_buf);
+			glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, frame_buf);
+			
+			// combine FBO to color buffer
+			glFramebufferTexture2DEXT(GL_FRAMEBUFFER_EXT, GL_COLOR_ATTACHMENT0_EXT, GL_TEXTURE_2D, color_buf, 0);
+			
+			// combine FBO to depth buffer
+			if (create_depth)
+				glFramebufferRenderbufferEXT(GL_FRAMEBUFFER_EXT, GL_DEPTH_ATTACHMENT_EXT, GL_RENDERBUFFER_EXT, depth_buf);
+			
+			// reset FBO
+			glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, 0);
+		}
+	}
+	
+	EnableOpenGLDebugMessages(0);
+}
+
 void MultiStage::Ogl_UpdateTexBuffers() {
 	bool set_output = true;
 	for (int i = passes.GetCount()-1; i >= 0; i--) {
 		Stage& pass = passes[i];
 		pass.ClearTex();
-		if (pass.is_common)
-			continue;
-		
-		if (set_output) {
-			set_output = false;
-			pass.is_buffer = false;
+		if (pass.type == Stage::TYPE_LIBRARY) {
+			// do nothing
+		}
+		else if (pass.type == Stage::TYPE_IMAGE) {
+			// do nothing
+		}
+		else if (pass.type == Stage::TYPE_SOUND || pass.type == Stage::TYPE_SOUND_BUFFER) {
+			Ogl_CreateTex(pass, Size(audio_sample_size, 1), 2);
+			sound_buf.SetCount(audio_sample_size, vec2(0,0));
+		}
+		else if (pass.type == Stage::TYPE_IMAGE_BUFFER) {
+			Ogl_CreateTex(pass, stream.size, 4);
 		}
 		else {
-			pass.is_buffer = true;
-			int buf_count = 1;
-			if (pass.is_doublebuf)
-				buf_count++;
-			for(int bi = 0; bi < buf_count; bi++) {
-				GLuint& color_buf = pass.color_buf[bi];
-				GLuint& depth_buf = pass.depth_buf[bi];
-				GLuint& frame_buf = pass.frame_buf[bi];
-				ASSERT(color_buf == 0);
-				
-				// color buffer
-				glGenTextures(1, &color_buf);
-				glBindTexture(GL_TEXTURE_2D, color_buf);
-				glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, stream.size.cx, stream.size.cy, 0, GL_RGBA, GL_UNSIGNED_BYTE, 0);
-				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-				glBindTexture(GL_TEXTURE_2D, 0);
-				
-				// depth buffer
-				glGenRenderbuffersEXT(1, &depth_buf);
-				glBindRenderbufferEXT(GL_RENDERBUFFER_EXT, depth_buf);
-				glRenderbufferStorageEXT(GL_RENDERBUFFER_EXT, GL_DEPTH_COMPONENT, stream.size.cx, stream.size.cy);
-				glBindRenderbufferEXT(GL_RENDERBUFFER_EXT, 0);
-				
-				// FBO
-				glGenFramebuffersEXT(1, &frame_buf);
-				glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, frame_buf);
-				
-				// combine FBO to color buffer
-				glFramebufferTexture2DEXT(GL_FRAMEBUFFER_EXT, GL_COLOR_ATTACHMENT0_EXT, GL_TEXTURE_2D, color_buf, 0);
-				
-				// combine FBO to depth buffer
-				glFramebufferRenderbufferEXT(GL_FRAMEBUFFER_EXT, GL_DEPTH_ATTACHMENT_EXT, GL_RENDERBUFFER_EXT, depth_buf);
-				
-				// reset FBO
-				glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, 0);
-			}
+			LOG("warning: unhandled stage type " << pass.GetStageTypeString());
 		}
 	}
 	
@@ -105,7 +126,7 @@ int MultiStage::Ogl_NewTexture(Size res, GLuint* tex_, int tex_n, GLenum type, c
 	return 1;
 }
 
-int MultiStage::Ogl_LoadTexture(String filename, GLenum type, GLenum *tex_id, char filter, char repeat, bool flip) {
+int MultiStage::Ogl_LoadTexture(String filename, GLenum type, StageInput& in, char filter, char repeat, bool flip) {
 	Image img = StreamRaster::LoadFileAny(filename);
 	if (!img) {
 		last_error = "couldn't load file " + filename;
@@ -114,13 +135,15 @@ int MultiStage::Ogl_LoadTexture(String filename, GLenum type, GLenum *tex_id, ch
 	
 	int width = img.GetWidth();
 	int height = img.GetHeight();
+	in.tex = 0;
+	in.res = Size(width, height);
 	if (!width || !height) {
 		last_error = "empty image " + filename;
 		return 0;
 	}
 	
-	glGenTextures(1, tex_id);
-	glBindTexture(type, *tex_id);
+	glGenTextures(1, &in.tex);
+	glBindTexture(type, in.tex);
 	
 	int channels = 0;
 	
@@ -179,7 +202,7 @@ int MultiStage::Ogl_LoadTexture(String filename, GLenum type, GLenum *tex_id, ch
 	Ogl_TexFlags(type, filter, repeat);
 	
 	
-	LOG("\t\t\ttexture: " << filename << ", " << width << "x" << height << " (" << channels << ") --> id " << *tex_id << "\n");
+	LOG("\t\t\ttexture: " << filename << ", " << width << "x" << height << " (" << channels << ") --> id " << in.tex << "\n");
 	
 	GLenum err = glGetError();
 	if (err != GL_NO_ERROR) {
@@ -494,12 +517,22 @@ int MultiStage::GetTexType(Stage& cur_stage, int input_i) const {
 	}
 }
 
-int MultiStage::GetChCode(int channels) {
-	switch (channels) {
-		case 1: return GL_RED;
-		case 2: return GL_RG;
-		case 3: return GL_RGB;
-		case 4: return GL_RGBA;
+int MultiStage::GetChCode(int channels, bool is_float) {
+	if (!is_float) {
+		switch (channels) {
+			case 1: return GL_RED;
+			case 2: return GL_RG;
+			case 3: return GL_RGB;
+			case 4: return GL_RGBA;
+		}
+	}
+	else {
+		switch (channels) {
+			case 1: return GL_R32F;
+			case 2: return GL_RG32F;
+			case 3: return GL_RGB32F;
+			case 4: return GL_RGBA32F;
+		}
 	}
 	return 0;
 }

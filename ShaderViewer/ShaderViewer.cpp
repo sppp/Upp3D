@@ -13,13 +13,25 @@ void ShaderViewer::Initialize() {
 	if (!ms.Load(path))
 		Panic("Couldn't load the shader: " + path);
 	
+	Shared<RenderingSystem> rend_sys = GetEntity().GetMachine().Get<RenderingSystem>();
+	if (rend_sys)
+		rend_sys	-> AddScreenSource(*this);
+	
+	Shared<AudioSystem> audio_sys = GetEntity().GetMachine().Get<AudioSystem>();
+	if (audio_sys)
+		audio_sys	-> AddAudioSource(*this);
+	
 }
 
 void ShaderViewer::Uninitialize() {
 	
+    Shared<RenderingSystem> rend_sys = GetEntity().GetMachine().Get<RenderingSystem>();
+	if (rend_sys)
+		rend_sys->RemoveRenderable(*this);
+	
 }
 
-void ShaderViewer::Render(SystemDraw& draw) {
+void ShaderViewer::Render(const ScreenSinkConfig& config,SystemDraw& draw) {
 	//Size sz = draw.GetPageSize();
 	//draw.DrawRect(sz, RandomColor(64, 64));
 	if (fail)
@@ -36,12 +48,31 @@ void ShaderViewer::Render(SystemDraw& draw) {
 	else
 		ms.SetSize(sz);
 	
+	ms.SetFPS(config.fps);
 	ms.Paint();
+}
+
+void ShaderViewer::Play(const AudioSinkConfig& config, SystemSound& snd) {
+	
+	TODO
+	
+}
+
+void ShaderViewer::EmitScreenSource(float dt) {
+	for(ScreenSink* sink : ScreenSource::GetSinks())
+		sink->RecvScreenSink(*this, dt);
+}
+
+void ShaderViewer::EmitAudioSource(float dt) {
+	for(AudioSink* sink : AudioSource::GetSinks())
+		sink->RecvAudioSink(*this, dt);
 }
 
 void ShaderViewer::RecvCtrlEvent(const CtrlEvent& e) {
 	ms.Event(e);
 }
+
+
 
 
 

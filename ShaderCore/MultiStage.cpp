@@ -161,6 +161,7 @@ void MultiStage::DumpStages() {
 		Stage& s = passes[i];
 		LOG(i << " stage");
 		LOG("\tName: " << s.name);
+		LOG("\tType: " << s.GetStageTypeString());
 		LOG("\tDescription: " << s.description);
 		LOG("\tInputs:");
 		for(int j = 0; j < s.in.GetCount(); j++) {
@@ -241,13 +242,17 @@ bool MultiStage::Load(String path) {
 				
 				if (key == "name") {
 					s.name = value;
+					if (s.name == "Image")
+						SetPassType(pass_i, Stage::TYPE_IMAGE);
+					else if (s.name == "Sound")
+						SetPassType(pass_i, Stage::TYPE_SOUND);
 				}
 				else if (key == "description") {
 					s.description = value;
 				}
 				else if (key == "type") {
 					if (value == "common") {
-						SetPassCommon(pass_i, true);
+						SetPassType(pass_i, Stage::TYPE_LIBRARY);
 					}
 				}
 				else {
@@ -400,6 +405,11 @@ bool MultiStage::Open(Size output_sz) {
 		return false;
 	}
 	
+	if (VirtualSoundPtr) {
+		audio_sample_size = VirtualSoundPtr->GetSampleRate();
+		ASSERT(audio_sample_size > 0);
+	}
+	
 	for (Stage& s : passes)
 		for (StageInput& i : s.in)
 			if (i.type == INPUT_WEBCAM || i.type == INPUT_VIDEO)
@@ -410,7 +420,7 @@ bool MultiStage::Open(Size output_sz) {
 		Stage& pass = passes[i];
 		LOG("\tCompiling stage " << i << ": " << pass.name);
 		
-		if (pass.is_common) {
+		if (pass.IsLibrary()) {
 			ASSERT(pass.prog[Stage::PROG_FRAGMENT] < 0);
 			continue;
 		}
@@ -465,17 +475,30 @@ bool MultiStage::Open(Size output_sz) {
 		
 		for(int j = 0; j < passes.GetCount(); j++) {
 			Stage& pass0 = passes[j];
-			if (pass0.is_common)
+			if (pass0.IsLibrary())
 				code += pass0.fg_glsl + "\n";
 		}
 		
 		code += pass.fg_glsl;
 		
-		code +=		"\nvoid main (void) {\n"
-					"	vec4 color = vec4 (0.0, 0.0, 0.0, 1.0);\n"
-					"	mainImage (color, gl_FragCoord.xy);\n"
-					"	gl_FragColor = color;\n"
-					"}\n\n";
+		if (pass.type == Stage::TYPE_IMAGE || pass.type == Stage::TYPE_IMAGE_BUFFER) {
+			code +=		"\nvoid main (void) {\n"
+						"	vec4 color = vec4 (0.0, 0.0, 0.0, 1.0);\n"
+						"	mainImage (color, gl_FragCoord.xy);\n"
+						"	gl_FragColor = color;\n"
+						"}\n\n";
+		}
+		else if (pass.type == Stage::TYPE_SOUND || pass.type == Stage::TYPE_SOUND_BUFFER) {
+			code +=		"\nvoid main (void) {\n"
+						"	float t = iTime + gl_FragCoord.x / iSampleRate;\n"
+						"	vec2 value = mainSound (t);\n"
+						"	gl_FragColor = vec4(value, 0.0, 1.0);\n"
+						"}\n\n";
+		}
+		else {
+			last_error = "type of stage " + IntStr(i) + " is not supported";
+			return false;
+		}
 		
 		// Hotfixes
 		code.Replace("precision float;", "");
@@ -496,7 +519,7 @@ bool MultiStage::Open(Size output_sz) {
 	
 	for(int i = 0; i < passes.GetCount(); i++) {
 		Stage& pass = passes[i];
-		if (pass.is_common)
+		if (pass.IsLibrary())
 			continue;
 		
 		LOG("\tLinking stage " << i << ": " << pass.name);
@@ -517,7 +540,7 @@ bool MultiStage::Open(Size output_sz) {
 				
 			}
 			else if (in.type == INPUT_TEXTURE) {
-				if (!Ogl_LoadTexture(in.filename, GL_TEXTURE_2D, &in.tex, in.filter, in.repeat, in.vflip)) {
+				if (!Ogl_LoadTexture(in.filename, GL_TEXTURE_2D, in, in.filter, in.repeat, in.vflip)) {
 					Close();
 					last_error = "Couldn't load texture";
 					return false;
@@ -710,7 +733,17 @@ bool MultiStage::Key(dword key, int count) {
 }
 
 void MultiStage::Paint() {
+	if (!is_open)
+		return;
+	
 	Time now = GetSysTime();
+	int us = 0;
+	{
+		struct timeval start;
+		gettimeofday(&start, NULL);
+		us = start.tv_usec;
+	}
+
 	
 	stream.total_seconds = total_time.Seconds();
 	stream.frame_seconds = frame_time.Seconds();
@@ -735,14 +768,24 @@ void MultiStage::Paint() {
 		if (pass.is_doublebuf)
 			bi = (bi + 1) % 2;
 		
-		if (pass.is_buffer) {
-			ASSERT(pass.frame_buf[bi] > 0);
+		if (pass.type == Stage::TYPE_IMAGE) {
+			// do nothing
+		}
+		else if (pass.type == Stage::TYPE_IMAGE_BUFFER ||
+			pass.type == Stage::TYPE_SOUND_BUFFER ||
+			pass.type == Stage::TYPE_SOUND) {
+			ASSERT(pass.type != Stage::TYPE_IMAGE_BUFFER || pass.frame_buf[bi] > 0);
 			const GLenum bufs[] = {GL_COLOR_ATTACHMENT0_EXT};
 			// combine FBO
 		    glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, pass.frame_buf[bi]);
 		    
 		    // set up render target
 		    glDrawBuffers(sizeof bufs / sizeof bufs[0], bufs);
+		}
+		else {
+			LOG("error: unimplemented stage type in MultiStage::Paint");
+			Close();
+			return;
 		}
 		/*else {
 			ASSERT(pass.color_buf > 0);
@@ -787,7 +830,8 @@ void MultiStage::Paint() {
 		
 		uindex = glGetUniformLocation(prog, "iDate");
 		if (uindex >= 0) {
-			int sec = ((int)now.hour * 60 + (int)now.minute) * 60 + (int)now.second;
+			double sec = ((int)now.hour * 60 + (int)now.minute) * 60 + (int)now.second;
+			sec += 0.000001 * us;
 			glUniform4f(uindex, now.year, now.month, now.day, sec);
 		}
 		
@@ -874,40 +918,75 @@ void MultiStage::Paint() {
 		
 		uindex = glGetUniformLocation(prog, "iChannelResolution");
 		if (uindex >= 0) {
-			GLfloat values[4*3];
+			char key[] = "iChannelResolution[0]";
+			
 			for(int j = 0; j < 4; j++) {
-				bool is_valid = false;
-				if (j < pass.in.GetCount()) {
-					StageInput& in = pass.in[j];
-					if (in.stream) {
-						is_valid = true;
-						Size sz = in.stream->GetResolution();
-						values[j*3+0] = sz.cx;
-						values[j*3+1] = sz.cy;
-						values[j*3+2] = 0;
+				uindex = glGetUniformLocation(prog, key);
+				if (uindex >= 0) {
+					GLfloat values[3] = {0,0,0};
+					
+					if (j < pass.in.GetCount()) {
+						StageInput& in = pass.in[j];
+						if (in.stream) {
+							Size sz = in.stream->GetResolution();
+							values[0] = sz.cx;
+							values[1] = sz.cy;
+							values[2] = 66;
+						}
+						else if (
+							in.type == INPUT_TEXTURE ||
+							in.type == INPUT_CUBEMAP ||
+							in.type == INPUT_VOLUME) {
+							values[0] = in.res.cx;
+							values[1] = in.res.cy;
+							values[2] = in.vol_depth;
+						}
 					}
+					glUniform3f(uindex, values[0], values[1], values[2]);
 				}
-				if (!is_valid) {
-					values[j*3+0] = 0;
-					values[j*3+1] = 0;
-					values[j*3+2] = 0;
-				}
+				key[19]++; // increase '0' char position
 			}
-			glUniformMatrix3fv(uindex, 4, false, values);
 		}
 		
 		
 		glClear(GL_COLOR_BUFFER_BIT);
 		glRectf(-1.0, -1.0, 1.0, 1.0);
 		
+		EnableOpenGLDebugMessages(1);
 		
 		if (pass.frame_buf[bi] > 0) {
 			// backup render target
-		    glDrawBuffer(GL_FRONT);
+		    //glDrawBuffer(GL_FRONT);
 		    
+			
+			if (pass.type == Stage::TYPE_SOUND) {
+				ASSERT(pass.color_buf[bi] > 0);
+				glReadBuffer(GL_COLOR_ATTACHMENT0_EXT);
+				glReadPixels(0, 0, audio_sample_size, 1, GL_RG, GL_FLOAT, sound_buf.Begin());
+				
+				if (0) {
+					double vol = 0;
+					for(const vec2& v : sound_buf) {
+						vol += fabsf(v[0]);
+						vol += fabsf(v[1]);
+					}
+					vol /= sound_buf.GetCount() * 2;
+					
+					String line = " --- ";
+					int ivol = vol * 10;
+					if (ivol) {
+						line.Cat('#', ivol);
+						LOG(line);
+					}
+				}
+			}
+			
+			
 		    // reset FBO
 		    glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, 0);
 		}
+		
+		EnableOpenGLDebugMessages(0);
 	}
 	
 	
@@ -935,8 +1014,8 @@ void MultiStage::RealizeCount(int pass, int in) {
 	//	s.out.SetCount(out+1);
 }
 
-void MultiStage::SetPassCommon(int pass, bool b) {
-	passes[pass].is_common = b;
+void MultiStage::SetPassType(int pass, int type) {
+	passes[pass].type = type;
 }
 
 void MultiStage::SetPassCode(int pass, String vtx_glsl, String frag_glsl) {
@@ -1022,7 +1101,7 @@ bool MultiStage::CheckInputTextures() {
 			auto& prog = s.prog[i];
 			if (prog >= 0) {
 				for(int j = 0; j < CHANNEL_COUNT; j++) {
-					GLint uindex = glGetUniformLocation(prog, "iChannel0");
+					GLint uindex = glGetUniformLocation(prog, "iChannel" + IntStr(j));
 					if (uindex >= 0) {
 						if (s.in.GetCount() > j) {
 							int tex = GetInputTex(s, j);
@@ -1131,6 +1210,8 @@ MultiStage::VideoInput* MultiStage::FindVideoInput(String path) {
 }
 
 void MultiStage::Event(const CtrlEvent& e) {
+	if (!is_open)
+		return;
 	
 	if (e.type == EVENT_MOUSEMOVE) {
 		MouseMove(e.pt, e.value);
@@ -1161,6 +1242,9 @@ void MultiStage::Event(const CtrlEvent& e) {
 		if (e.sz.cx >= 100 && e.sz.cy >= 100)
 			SetSize(e.sz);
 	}
+	else if (e.type == EVENT_SHUTDOWN) {
+		Close();
+	}
 	else {
 		last_error = "event not supported: " + GetEventTypeString(e.type);
 		LOG("error: " << last_error);
@@ -1186,11 +1270,15 @@ void Stage::ClearTex() {
 		GLuint& frame_buf = this->frame_buf[bi];
 		
 		if (color_buf > 0) {
-			GLuint i[2] = {color_buf, depth_buf};
-			glDeleteTextures(2, i);
-			glDeleteFramebuffers(1, &frame_buf);
+			glDeleteTextures(1, &color_buf);
 			color_buf = 0;
+		}
+		if (depth_buf > 0) {
+			glDeleteTextures(1, &depth_buf);
 			depth_buf = 0;
+		}
+		if (frame_buf > 0) {
+			glDeleteFramebuffers(1, &frame_buf);
 			frame_buf = 0;
 		}
 	}

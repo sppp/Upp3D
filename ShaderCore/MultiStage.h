@@ -10,6 +10,8 @@ struct StageInput {
 	bool vflip = 0;
 	String filename;
 	GLenum tex = 0;
+	Size res = {0,0};
+	int vol_depth = 0;
 	const VolatileStream* stream = 0;
 	
 	enum {
@@ -22,6 +24,7 @@ struct StageInput {
 		REPEAT_CLAMP,
 		REPEAT_REPEAT,
 	};
+	
 	
 	String GetFilterString() const {
 		switch (filter) {
@@ -57,6 +60,16 @@ struct Stage {
 		
 		PROG_COUNT
 	};
+	
+	enum {
+		TYPE_IMAGE_BUFFER,
+		TYPE_SOUND_BUFFER,
+		TYPE_IMAGE,
+		TYPE_SOUND,
+		TYPE_VERTEX,
+		TYPE_CTRL,
+		TYPE_LIBRARY,
+	};
 	GLint						prog[PROG_COUNT] = {-1,-1};
 	GLuint						color_buf[2] = {0,0};
 	GLuint						depth_buf[2] = {0,0};
@@ -67,18 +80,37 @@ struct Stage {
 	String						fg_glsl;
 	int							id = -1;
 	int							buf_i = 0;
+	int							type = TYPE_IMAGE_BUFFER;
 	bool						is_doublebuf = false;
-	bool						is_common = false;
-	bool						is_buffer = false;
 	
 	~Stage() {ClearTex();}
 	void ClearTex();
 	
+	bool IsLibrary() const {return type == TYPE_LIBRARY;}
 	
 	bool operator()(const Stage& a, const Stage& b) const {
-		if (a.name == "Image") return 0;
-		if (b.name == "Image") return 1;
+		#define GREATER(x) if (a.type == x) return false; if (b.type == x) return true;
+		GREATER(TYPE_SOUND); // sound is faster to calc, so the sync is better by doing sound last
+		GREATER(TYPE_SOUND_BUFFER);
+		GREATER(TYPE_IMAGE);
+		GREATER(TYPE_IMAGE_BUFFER);
+		GREATER(TYPE_VERTEX);
+		GREATER(TYPE_CTRL);
+		GREATER(TYPE_LIBRARY);
 		return StdLess<String>()(a.name, b.name);
+	}
+	
+	String GetStageTypeString() const {
+		switch (type) {
+			case TYPE_IMAGE_BUFFER:	return "Image Buffer";
+			case TYPE_SOUND_BUFFER: return "Sound Buffer";
+			case TYPE_IMAGE:		return "Image";
+			case TYPE_SOUND:		return "Sound";
+			case TYPE_VERTEX:		return "Vertex";
+			case TYPE_CTRL:			return "Ctrl";
+			case TYPE_LIBRARY:		return "Library";
+		}
+		return "<invalid type>";
 	}
 };
 
@@ -147,6 +179,10 @@ class MultiStage {
 	int last_time = 0;
 	bool is_open = false;
 	
+	// Sound settings
+	int audio_sample_size = 512;
+	Vector<vec2> sound_buf;
+	
 	// Video device input
 	Array<VideoInput> vid_inputs;
 	MediaDeviceManager vidmgr;
@@ -162,7 +198,7 @@ class MultiStage {
 	
 	
 	int   Ogl_NewTexture(Size res, GLuint* tex, int tex_n, GLenum type, char filter, char repeat);
-	int   Ogl_LoadTexture(String filename, GLenum type, GLenum *tex_id, char filter, char repeat, bool flip);
+	int   Ogl_LoadTexture(String filename, GLenum type, StageInput& in, char filter, char repeat, bool flip);
 	int   Ogl_LoadVolume(String filename, GLenum *tex_id, char filter, char repeat, bool flip);
 	int   Ogl_LoadCubemap(String filename, GLenum *tex_id, char filter, char repeat, bool flip);
 	GLint Ogl_CompileShader(const GLenum shader_type, String shader_source);
@@ -170,10 +206,11 @@ class MultiStage {
 	bool  Ogl_LinkProgram(Stage& s);
 	void  Ogl_UpdateTexBuffers();
 	void  Ogl_TexFlags(int type, int filter, int repeat);
+	void  Ogl_CreateTex(Stage& s, Size sz, int channels);
 	void  UpdateTexBuffers();
 	int   GetInputTex(Stage& cur_stage, int input_i) const;
 	int   GetTexType(Stage& cur_stage, int input_i) const;
-	int   GetChCode(int channels);
+	int   GetChCode(int channels, bool is_float=false);
 	void  StartMediaThreads();
 	void  StopMediaThreads();
 	
@@ -189,7 +226,7 @@ protected:
 	void SetInputCount(int pass, int count);
 	//void SetOutputCount(int pass, int count);
 	void RealizeCount(int pass, int in);
-	void SetPassCommon(int pass, bool b);
+	void SetPassType(int pass, int type);
 	void SetPassCode(int pass, String vtx_glsl, String frag_glsl);
 	void SetInputId(int pass, int i, int id);
 	void SetInputType(int pass, int i, int type);
