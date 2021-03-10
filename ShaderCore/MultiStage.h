@@ -162,26 +162,36 @@ class MultiStage {
 		DATA_IN_MIDI,
 	};
 	
-	PipelineStream stream;
-	
-	TimeStop frame_time, total_time;
-	double geometry[4] = {0,0,0,0};
-	double mouse[4] = {0,0,0,0};
-	int frames = 0;
-	int fps_limit = 60;
-	bool is_left_down = false;
-	
-	Vector<uint32> gl_stages;
+	// Generic
 	Array<Stage> passes;
+	PipelineStream stream;
+	TimeStop total_time;
 	String name;
 	String description;
 	String last_error;
 	int last_time = 0;
 	bool is_open = false;
 	
-	// Sound settings
-	int audio_sample_size = 512;
-	Vector<vec2> sound_buf;
+	// Video
+	Vector<uint32> gl_stages;
+	double geometry[4] = {0,0,0,0};
+	double mouse[4] = {0,0,0,0};
+	TimeStop vframe_time;
+	int vframes = 0;
+	int fps_limit = 60;
+	bool is_left_down = false;
+	
+	// Audio
+	Vector<float> sound_buf;
+	TimeStop aframe_time;
+	//float audio_sync_ival = 1.0f;
+	float audio_last_sync_sec = 0;
+	int audio_sample_freq = 44100;
+	int audio_sample_rate = 512;
+	int audio_sample_size = 4;
+	int audio_sample_channels = 2;
+	int aframes_after_sync = 0;
+	int aframes = 0;
 	
 	// Video device input
 	Array<VideoInput> vid_inputs;
@@ -266,6 +276,14 @@ protected:
 			case INPUT_INVALID: return "invalid";
 		}
 	}
+	
+	enum {
+		PROC_VIDEO,
+		PROC_SOUND,
+	};
+	
+	void Process(int mode, SystemDraw* draw, SystemSound* snd, bool is_audio_sync);
+	
 public:
 	typedef MultiStage CLASSNAME;
 	
@@ -277,7 +295,8 @@ public:
 	void Close();
 	void DumpStages();
 	
-	void Paint();
+	void Render(SystemDraw& draw);
+	void Play(SystemSound& snd, bool is_audio_sync);
 	void Event(const CtrlEvent& e);
 	void LeftDown(Point p, dword keyflags);
 	void LeftUp(Point p, dword keyflags);
@@ -286,6 +305,7 @@ public:
 	
 	void SetSize(Size sz);
 	void SetFPS(int fps) {fps_limit = fps;}
+	//void SetAudioSyncInterval(float dt) {audio_sync_ival = dt;}
 	
 	String GetLastError() const {return last_error;}
 	Size GetSize() const {return stream.size;}

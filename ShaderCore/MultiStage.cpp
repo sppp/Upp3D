@@ -397,7 +397,9 @@ bool MultiStage::Open(Size output_sz) {
 		Close();
 	
 	vidmgr.Refresh();
-	frames = 0;
+	vframes = 0;
+	aframes = 0;
+	aframes_after_sync = 0;
 	
 	LOG("MultiStage::Open: size " << output_sz.ToString());
 	if (passes.IsEmpty()) {
@@ -406,8 +408,14 @@ bool MultiStage::Open(Size output_sz) {
 	}
 	
 	if (VirtualSoundPtr) {
-		audio_sample_size = VirtualSoundPtr->GetSampleRate();
-		ASSERT(audio_sample_size > 0);
+		audio_sample_size = VirtualSoundPtr->GetAudioSampleSize();
+		audio_sample_rate = VirtualSoundPtr->GetAudioSampleRate();
+		audio_sample_channels = VirtualSoundPtr->GetAudioChannels();
+		audio_sample_freq = VirtualSoundPtr->GetAudioFrequency();
+		ASSERT(	audio_sample_size > 0 &&
+				audio_sample_rate > 0 &&
+				audio_sample_channels > 0 &&
+				audio_sample_freq > 0);
 	}
 	
 	for (Stage& s : passes)
@@ -621,7 +629,10 @@ bool MultiStage::Open(Size output_sz) {
 	StartMediaThreads();
 	
 	total_time.Reset();
-	frame_time.Reset();
+	vframe_time.Reset();
+	aframe_time.Reset();
+	//async_time.Reset();
+	audio_last_sync_sec = 0;
 	
 	is_open = true;
 	return true;
@@ -732,9 +743,25 @@ bool MultiStage::Key(dword key, int count) {
 	return true;
 }
 
-void MultiStage::Paint() {
+void MultiStage::Render(SystemDraw& draw) {
+	Process(PROC_VIDEO, &draw, 0, false);
+}
+
+void MultiStage::Play(SystemSound& snd, bool is_audio_sync) {
+	Process(PROC_SOUND, 0, &snd, is_audio_sync);
+}
+
+void MultiStage::Process(int mode, SystemDraw* draw, SystemSound* snd, bool is_audio_sync) {
 	if (!is_open)
 		return;
+	
+	bool do_video = mode == PROC_VIDEO;
+	bool do_audio = mode == PROC_SOUND;
+	bool do_video_time = do_video || !do_audio;
+	ASSERT(!do_audio || snd);
+	ASSERT(!do_video || draw);
+	if (do_audio && !snd) return;
+	if (do_video && !draw) return;
 	
 	Time now = GetSysTime();
 	int us = 0;
@@ -743,18 +770,56 @@ void MultiStage::Paint() {
 		gettimeofday(&start, NULL);
 		us = start.tv_usec;
 	}
-
 	
-	stream.total_seconds = total_time.Seconds();
-	stream.frame_seconds = frame_time.Seconds();
+	if (do_video_time) {
+		stream.total_seconds = total_time.Seconds();
+		stream.frame_seconds = vframe_time.Seconds();
+	}
+	else {
+		stream.frame_seconds = aframe_time.Seconds();
+		if (aframes == 0 || is_audio_sync) {
+			audio_last_sync_sec = total_time.Seconds();
+			stream.total_seconds = audio_last_sync_sec;
+			is_audio_sync = true;
+			aframes_after_sync = 0;
+		}
+		else {
+			int samples_after_last_sync = aframes_after_sync * audio_sample_rate;
+			stream.total_seconds =
+				audio_last_sync_sec +
+				(float)samples_after_last_sync / (float)audio_sample_freq;
+		}
+	}
 	
-	for (VideoInput& vi : vid_inputs)
-		vi.PaintOpenGL();
-	for (DataBuffer& db : data_bufs.GetValues())
-		db.PaintOpenGL();
+	if (do_video)
+		for (VideoInput& vi : vid_inputs)
+			vi.PaintOpenGL();
+	
+	if (do_audio)
+		for (DataBuffer& db : data_bufs.GetValues())
+			db.PaintOpenGL();
 	
 	for(int i = 0; i < passes.GetCount(); i++) {
 		Stage& pass = passes[i];
+		
+		bool do_proc = false;
+		switch (pass.type) {
+			case Stage::TYPE_IMAGE_BUFFER:	do_proc = do_video; break;
+			case Stage::TYPE_SOUND_BUFFER:	do_proc = do_audio; break;
+			case Stage::TYPE_IMAGE:			do_proc = do_video; break;
+			case Stage::TYPE_SOUND:			do_proc = do_audio; break;
+			case Stage::TYPE_VERTEX:		do_proc = do_video; break;
+			case Stage::TYPE_CTRL:			do_proc = do_video; break;
+			case Stage::TYPE_LIBRARY:		do_proc = false;	break;
+			default:
+				LOG("error: unimplemented stage type in MultiStage::Paint");
+				Close();
+				return;
+		}
+		if (!do_proc)
+			continue;
+		
+		
 		GLuint gl_stage = gl_stages[i];
 		
 		GLint& fg_prog = pass.prog[Stage::PROG_FRAGMENT];
@@ -771,7 +836,8 @@ void MultiStage::Paint() {
 		if (pass.type == Stage::TYPE_IMAGE) {
 			// do nothing
 		}
-		else if (pass.type == Stage::TYPE_IMAGE_BUFFER ||
+		else
+		if (pass.type == Stage::TYPE_IMAGE_BUFFER ||
 			pass.type == Stage::TYPE_SOUND_BUFFER ||
 			pass.type == Stage::TYPE_SOUND) {
 			ASSERT(pass.type != Stage::TYPE_IMAGE_BUFFER || pass.frame_buf[bi] > 0);
@@ -787,19 +853,11 @@ void MultiStage::Paint() {
 			Close();
 			return;
 		}
-		/*else {
-			ASSERT(pass.color_buf > 0);
-			// activate texturemap
-		    glActiveTexture(GL_TEXTURE0);
-		    glBindTexture(GL_TEXTURE_2D, pass.color_buf);
-		}*/
 	    
 	    glBindProgramPipeline(gl_stage);
 		glUseProgram(prog);
 		
-		if (frames % 100 == 0) {
-			fprintf(stderr, "FPS: %.2f\n", 1.0 / stream.frame_seconds);
-		}
+		//if (do_video && vframes % 100 == 0) {fprintf(stderr, "FPS: %.2f\n", 1.0 / stream.frame_seconds);}
 		
 		uindex = glGetUniformLocation(prog, "iResolution");
 		if (uindex >= 0) {
@@ -821,7 +879,7 @@ void MultiStage::Paint() {
 		
 		uindex = glGetUniformLocation(prog, "iFrame");
 		if (uindex >= 0) {
-			glUniform1i(uindex, frames);
+			glUniform1i(uindex, do_video_time ? vframes : aframes);
 		}
 		
 		uindex = glGetUniformLocation(prog, "iMouse");
@@ -837,7 +895,7 @@ void MultiStage::Paint() {
 		
 		uindex = glGetUniformLocation(prog, "iSampleRate");
 		if (uindex >= 0)
-			glUniform1f(uindex, 44100); // TODO
+			glUniform1f(uindex, audio_sample_freq);
 		
 		uindex = glGetUniformLocation(prog, "iOffset");
 		if (uindex >= 0) {
@@ -962,15 +1020,13 @@ void MultiStage::Paint() {
 			if (pass.type == Stage::TYPE_SOUND) {
 				ASSERT(pass.color_buf[bi] > 0);
 				glReadBuffer(GL_COLOR_ATTACHMENT0_EXT);
-				glReadPixels(0, 0, audio_sample_size, 1, GL_RG, GL_FLOAT, sound_buf.Begin());
+				glReadPixels(0, 0, audio_sample_rate, 1, GetChCode(audio_sample_channels), GL_FLOAT, sound_buf.Begin());
 				
-				if (0) {
+				/*if (0) {
 					double vol = 0;
-					for(const vec2& v : sound_buf) {
-						vol += fabsf(v[0]);
-						vol += fabsf(v[1]);
-					}
-					vol /= sound_buf.GetCount() * 2;
+					for(float v : sound_buf)
+						vol += fabsf(v);
+					vol /= sound_buf.GetCount();
 					
 					String line = " --- ";
 					int ivol = vol * 10;
@@ -978,6 +1034,31 @@ void MultiStage::Paint() {
 						line.Cat('#', ivol);
 						LOG(line);
 					}
+				}*/
+				
+				if (snd->GetChannels() == audio_sample_channels &&
+					snd->GetSampleRate() == audio_sample_rate &&
+					snd->GetSampleSize() == audio_sample_size) {
+					bool tgt_is_floating = snd->IsFloating();
+					
+					if (audio_sample_size != 4 || !tgt_is_floating) {
+						Panic("TODO type conversion: f32 -> ...");
+					}
+					else {
+						//DUMPC(sound_buf);
+						/*for(int i = 0; i < sound_buf.GetCount(); i++) {
+							float v = sound_buf[i];
+							ASSERT((i % 2 == 0 && IsClose(v, 0.8)) || (i % 2 == 1 && IsClose(v, 0.25)));
+						}*/
+						/*for(int i = 0; i < sound_buf.GetCount(); i++) {
+							float& v = sound_buf[i];
+							v = i < sound_buf.GetCount() / 2 ? 0.0 : 1.0;
+						}*/
+						snd->Put((byte*)sound_buf.GetData(), sound_buf.GetCount() * sizeof(float), is_audio_sync);
+					}
+				}
+				else {
+					last_error = "unexpected output sound format while playing sound";
 				}
 			}
 			
@@ -990,8 +1071,15 @@ void MultiStage::Paint() {
 	}
 	
 	
-	frames++;
-	frame_time.Reset();
+	if (do_video_time) {
+		vframes++;
+		vframe_time.Reset();
+	}
+	else {
+		aframes++;
+		aframes_after_sync++;
+		aframe_time.Reset();
+	}
 }
 
 void MultiStage::SetInputCount(int pass, int count) {

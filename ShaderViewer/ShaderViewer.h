@@ -17,6 +17,8 @@ class ShaderViewer :
 	bool fail = false;
 	
 	
+	bool RealizeMultiStage(Size sz);
+	
 public:
 	IFACE_CB(ScreenSource);
 	IFACE_CB(AudioSource);

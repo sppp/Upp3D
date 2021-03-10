@@ -68,8 +68,8 @@ void MultiStage::Ogl_UpdateTexBuffers() {
 			// do nothing
 		}
 		else if (pass.type == Stage::TYPE_SOUND || pass.type == Stage::TYPE_SOUND_BUFFER) {
-			Ogl_CreateTex(pass, Size(audio_sample_size, 1), 2);
-			sound_buf.SetCount(audio_sample_size, vec2(0,0));
+			Ogl_CreateTex(pass, Size(audio_sample_rate, 1), audio_sample_channels);
+			sound_buf.SetCount(audio_sample_rate * audio_sample_channels);
 		}
 		else if (pass.type == Stage::TYPE_IMAGE_BUFFER) {
 			Ogl_CreateTex(pass, stream.size, 4);

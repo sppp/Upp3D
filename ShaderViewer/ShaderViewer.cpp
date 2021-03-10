@@ -31,31 +31,31 @@ void ShaderViewer::Uninitialize() {
 	
 }
 
-void ShaderViewer::Render(const ScreenSinkConfig& config,SystemDraw& draw) {
-	//Size sz = draw.GetPageSize();
-	//draw.DrawRect(sz, RandomColor(64, 64));
-	if (fail)
-		return;
-	
-	Size sz = draw.GetPageSize();
+bool ShaderViewer::RealizeMultiStage(Size sz) {
 	if (!ms.IsOpen()) {
 		if (!ms.Open(sz)) {
 			LOG("error: multistage open failed: \"" << ms.GetLastError() << "\"");
 			fail = true;
-			return;
+			return false;
 		}
 	}
 	else
 		ms.SetSize(sz);
-	
-	ms.SetFPS(config.fps);
-	ms.Paint();
+	return true;
+}
+
+void ShaderViewer::Render(const ScreenSinkConfig& config, SystemDraw& draw) {
+	if (!fail && RealizeMultiStage(draw.GetPageSize())) {
+		ms.SetFPS(config.fps);
+		ms.Render(draw);
+	}
 }
 
 void ShaderViewer::Play(const AudioSinkConfig& config, SystemSound& snd) {
-	
-	TODO
-	
+	if (!fail && ms.IsOpen()) {
+		//ms.SetAudioSyncInterval(config.sync_dt);
+		ms.Play(snd, config.sync);
+	}
 }
 
 void ShaderViewer::EmitScreenSource(float dt) {
@@ -64,6 +64,9 @@ void ShaderViewer::EmitScreenSource(float dt) {
 }
 
 void ShaderViewer::EmitAudioSource(float dt) {
+	ASSERT_(AudioSource::GetSinks().GetCount() == 1,
+		"Only the support for single audio sink is implemented currently");
+	
 	for(AudioSink* sink : AudioSource::GetSinks())
 		sink->RecvAudioSink(*this, dt);
 }
@@ -77,6 +80,7 @@ void ShaderViewer::RecvCtrlEvent(const CtrlEvent& e) {
 
 
 void ShaderViewerStartup() {
+	Sppp::SoundBufferUnitTest();
 	SetCoutLog();
 	const auto& args = CommandLine();
 	
